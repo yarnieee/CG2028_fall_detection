@@ -9,7 +9,10 @@
 #include "main.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_accelero.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h"
+#include "../Inc/ssd1306.h"
+#include "../Inc/ht16k33.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,9 +28,26 @@ static void UART1_Init(void);
 static void UART_Send(const char *text);
 
 extern int ewma_filter(int new_data, int old_output, int alpha_percent);
-//int ewma_filter_C(int new_data, int old_output, int alpha_percent);
+extern int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 
 UART_HandleTypeDef huart1;
+
+ADC_HandleTypeDef hadc1;
+I2C_HandleTypeDef hi2c1;
+
+#define OLED_ADDR    (0x3C << 1)
+#define MATRIX_ADDR  (0x70 << 1)
+
+static void External_Peripherals_Init(void);
+
+static uint16_t SoundSensor_Read(void);
+static void Buzzer_Set(uint8_t enabled);
+
+static uint8_t I2C_DevicePresent(uint16_t address);
+static void I2C_TestDevices(void);
+
+static SSD1306_HandleTypeDef oled;
+static HT16K33_HandleTypeDef led_matrix;
 
 int main(void)
 {
@@ -38,6 +58,40 @@ int main(void)
     BSP_ACCELERO_Init();
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
+
+    External_Peripherals_Init();
+    I2C_TestDevices();
+
+    if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK)
+    {
+        SSD1306_Clear(&oled);
+        SSD1306_SetCursor(&oled, 0, 0);
+        SSD1306_WriteString(&oled, "FALL DETECTOR");
+        SSD1306_SetCursor(&oled, 0, 16);
+        SSD1306_WriteString(&oled, "SYSTEM READY");
+        SSD1306_Update(&oled);
+    }
+    else
+    {
+        UART_Send("SSD1306 init failed\r\n");
+    }
+
+    if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK)
+    {
+        /* Simple startup pattern: an illuminated border. */
+        for (uint8_t i = 0; i < 8; i++)
+        {
+            HT16K33_SetPixel(&led_matrix, 0, i, 1);
+            HT16K33_SetPixel(&led_matrix, 7, i, 1);
+            HT16K33_SetPixel(&led_matrix, i, 0, 1);
+            HT16K33_SetPixel(&led_matrix, i, 7, 1);
+        }
+        HT16K33_Update(&led_matrix);
+    }
+    else
+    {
+        UART_Send("HT16K33 init failed\r\n");
+    }
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
@@ -52,8 +106,8 @@ int main(void)
     while (1)
     {
         int16_t accel_raw_i16[3] = {0, 0, 0};
-        float gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
-        int gyro_raw_int[3] = {0, 0, 0};
+        float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
+        int      gyro_raw_int[3] = {0, 0, 0};
 
         BSP_ACCELERO_AccGetXYZ(accel_raw_i16);
         BSP_GYRO_GetXYZ(gyro_raw_float);
@@ -122,6 +176,13 @@ int main(void)
             UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
         }
 
+        /*
+        printf("Accelerometer Readings (ASM): %d, %d, %d\n",  accel_ewma_asm[0], accel_ewma_asm[1], accel_ewma_asm[2]);
+        printf("    Gyroscope Readings (ASM): %d, %d, %d\n\n", gyro_ewma_asm[0],  gyro_ewma_asm[1],  gyro_ewma_asm[2]);
+        printf("Accelerometer Readings   (C): %d, %d, %d\n",    accel_ewma_c[0],   accel_ewma_c[1],   accel_ewma_c[2]);
+        printf("    Gyroscope Readings   (C): %d, %d, %d\n\n",   gyro_ewma_c[0],    gyro_ewma_c[1],    gyro_ewma_c[2]);
+		*/
+
         /**************** Elderly wearable state logic starts here************************
          * Compulsory requirements:
          * 1. Use filtered accelerometer AND gyroscope readings.
@@ -130,12 +191,69 @@ int main(void)
          *    a fall is detected.
          *********************************************************************/
 
-        int fall_detected = 0;  /* TODO: replace with your fall-detection logic */
+        /* TODO: replace with your fall-detection logic */
+        static int fall_detected = 0;
+
+        float accel_rms = sqrtf((
+        		accel_mps2[0] * accel_mps2[0] +
+        		accel_mps2[1] * accel_mps2[1] +
+				accel_mps2[2] * accel_mps2[2]
+		) / 3.0f);
+
+        float gyro_rms = sqrtf((
+        		gyro_dps[0] * gyro_dps[0] +
+				gyro_dps[1] * gyro_dps[1] +
+				gyro_dps[2] * gyro_dps[2]
+        ) / 3.0f);
+
+        if (accel_rms > 15.0 || gyro_rms > 40.0) {
+        	fall_detected = 1;
+        }
 
         BSP_LED_Toggle(LED2);
         HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
 
         sample_number++;
+
+		/********** Enhancements For The Elderly Wearable Device **********/
+
+        uint16_t sound_value = SoundSensor_Read();
+
+        if (sound_value > 2500)
+        {
+            Buzzer_Set(1);
+        }
+        else
+        {
+            Buzzer_Set(0);
+        }
+
+        char message[80];
+        snprintf(
+            message,
+            sizeof(message),
+            "Sound ADC = %u\r\n",
+            sound_value
+        );
+
+        UART_Send(message);
+
+        HAL_Delay(100);
+
+        /*
+        SSD1306_Clear();
+        SSD1306_SetCursor();
+        SSD1306_WriteString();
+        SSD1306_DrawPixel();
+        SSD1306_Update();
+
+        HT16K33_Clear();
+        HT16K33_SetPixel();
+        HT16K33_SetRow();
+        HT16K33_SetBrightness();
+        HT16K33_SetBlink();
+        HT16K33_Update();
+        */
     }
 }
 
@@ -180,6 +298,144 @@ static void UART1_Init(void)
     if (HAL_UART_Init(&huart1) != HAL_OK)
     {
         while (1) { }
+    }
+}
+
+static void External_Peripherals_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_ADC_CLK_ENABLE();
+    __HAL_RCC_I2C1_CLK_ENABLE();
+
+    /* Buzzer: PB4 / Arduino D5 */
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    /* Sound sensor: PC5 / Arduino A0 */
+    GPIO_InitStruct.Pin = GPIO_PIN_5;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    /* I2C1: PB8 = SCL, PB9 = SDA */
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    /* I2C1 configuration */
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.Timing = 0x00702681;
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+    {
+        while (1) {}
+    }
+
+    /* ADC1 configuration */
+    hadc1.Instance = ADC1;
+    hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV1;
+    hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+    hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+    hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+    hadc1.Init.LowPowerAutoWait = DISABLE;
+    hadc1.Init.ContinuousConvMode = DISABLE;
+    hadc1.Init.NbrOfConversion = 1;
+    hadc1.Init.DiscontinuousConvMode = DISABLE;
+    hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    hadc1.Init.DMAContinuousRequests = DISABLE;
+    hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
+    hadc1.Init.OversamplingMode = DISABLE;
+
+    if (HAL_ADC_Init(&hadc1) != HAL_OK)
+    {
+        while (1) {}
+    }
+
+    ADC_ChannelConfTypeDef channel = {0};
+    channel.Channel = ADC_CHANNEL_14;       /* PC5 */
+    channel.Rank = ADC_REGULAR_RANK_1;
+    channel.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+    channel.SingleDiff = ADC_SINGLE_ENDED;
+    channel.OffsetNumber = ADC_OFFSET_NONE;
+    channel.Offset = 0;
+
+    HAL_ADC_ConfigChannel(&hadc1, &channel);
+    HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+}
+
+static uint16_t SoundSensor_Read(void)
+{
+    uint16_t value = 0;
+
+    HAL_ADC_Start(&hadc1);
+
+    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+    {
+        value = (uint16_t)HAL_ADC_GetValue(&hadc1);
+    }
+
+    HAL_ADC_Stop(&hadc1);
+
+    return value;       /* 0 to 4095 */
+}
+
+static void Buzzer_Set(uint8_t enabled)
+{
+    HAL_GPIO_WritePin(
+        GPIOB,
+        GPIO_PIN_4,
+        enabled ? GPIO_PIN_SET : GPIO_PIN_RESET
+    );
+}
+
+static uint8_t I2C_DevicePresent(uint16_t address)
+{
+    return HAL_I2C_IsDeviceReady(
+        &hi2c1,
+        address,
+        2,
+        100
+    ) == HAL_OK;
+}
+
+static void I2C_TestDevices(void)
+{
+    if (I2C_DevicePresent(OLED_ADDR))
+    {
+        UART_Send("OLED detected\r\n");
+    }
+    else
+    {
+        UART_Send("OLED not detected\r\n");
+    }
+
+    if (I2C_DevicePresent(MATRIX_ADDR))
+    {
+        UART_Send("LED matrix detected\r\n");
+    }
+    else
+    {
+        UART_Send("LED matrix not detected\r\n");
     }
 }
 
