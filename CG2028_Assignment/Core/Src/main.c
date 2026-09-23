@@ -45,9 +45,14 @@ static void Buzzer_Set(uint8_t enabled);
 
 static uint8_t I2C_DevicePresent(uint16_t address);
 static void I2C_TestDevices(void);
+static void Matrix_ShowFace(const uint8_t face[8][8]);
+static void Matrix_ShowHappyFace(void);
+static void Matrix_ShowSadFace(void);
 
 static SSD1306_HandleTypeDef oled;
 static HT16K33_HandleTypeDef led_matrix;
+static uint8_t oled_ready = 0;
+static uint8_t led_matrix_ready = 0;
 
 int main(void)
 {
@@ -59,17 +64,19 @@ int main(void)
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
 
+	/********** SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION **********/
     External_Peripherals_Init();
     I2C_TestDevices();
 
     if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK)
     {
         SSD1306_Clear(&oled);
-        SSD1306_SetCursor(&oled, 0, 0);
+        SSD1306_SetCursor(&oled, 16, 0);
         SSD1306_WriteString(&oled, "FALL DETECTOR");
-        SSD1306_SetCursor(&oled, 0, 16);
+        SSD1306_SetCursor(&oled, 16, 32);
         SSD1306_WriteString(&oled, "SYSTEM READY");
         SSD1306_Update(&oled);
+        oled_ready = 1;
     }
     else
     {
@@ -78,15 +85,8 @@ int main(void)
 
     if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK)
     {
-        /* Simple startup pattern: an illuminated border. */
-        for (uint8_t i = 0; i < 8; i++)
-        {
-            HT16K33_SetPixel(&led_matrix, 0, i, 1);
-            HT16K33_SetPixel(&led_matrix, 7, i, 1);
-            HT16K33_SetPixel(&led_matrix, i, 0, 1);
-            HT16K33_SetPixel(&led_matrix, i, 7, 1);
-        }
-        HT16K33_Update(&led_matrix);
+        Matrix_ShowHappyFace();
+        led_matrix_ready = 1;
     }
     else
     {
@@ -176,13 +176,6 @@ int main(void)
             UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
         }
 
-        /*
-        printf("Accelerometer Readings (ASM): %d, %d, %d\n",  accel_ewma_asm[0], accel_ewma_asm[1], accel_ewma_asm[2]);
-        printf("    Gyroscope Readings (ASM): %d, %d, %d\n\n", gyro_ewma_asm[0],  gyro_ewma_asm[1],  gyro_ewma_asm[2]);
-        printf("Accelerometer Readings   (C): %d, %d, %d\n",    accel_ewma_c[0],   accel_ewma_c[1],   accel_ewma_c[2]);
-        printf("    Gyroscope Readings   (C): %d, %d, %d\n\n",   gyro_ewma_c[0],    gyro_ewma_c[1],    gyro_ewma_c[2]);
-		*/
-
         /**************** Elderly wearable state logic starts here************************
          * Compulsory requirements:
          * 1. Use filtered accelerometer AND gyroscope readings.
@@ -192,7 +185,10 @@ int main(void)
          *********************************************************************/
 
         /* TODO: replace with your fall-detection logic */
+
         static int fall_detected = 0;
+
+		/********** ACCELEROMETER AND GYROSCOPE **********/
 
         float accel_rms = sqrtf((
         		accel_mps2[0] * accel_mps2[0] +
@@ -206,22 +202,25 @@ int main(void)
 				gyro_dps[2] * gyro_dps[2]
         ) / 3.0f);
 
-        if (accel_rms > 15.0 || gyro_rms > 40.0) {
+        // @yarnieee TODO: Implement algorithm that distinguishes
+        // normal activity,
+        // near-fall movements,
+        // and a real fall
+
+        if (accel_rms > 15.0 || gyro_rms > 40.0)
+        {
         	fall_detected = 1;
         }
 
-        BSP_LED_Toggle(LED2);
-        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
-
-        sample_number++;
-
 		/********** Enhancements For The Elderly Wearable Device **********/
 
+		/********** SOUND SENSOR AND BUZZER **********/
         uint16_t sound_value = SoundSensor_Read();
 
         if (sound_value > 2500)
         {
             Buzzer_Set(1);
+            fall_detected = 1;
         }
         else
         {
@@ -235,25 +234,53 @@ int main(void)
             "Sound ADC = %u\r\n",
             sound_value
         );
-
         UART_Send(message);
 
-        HAL_Delay(100);
+		/********** OLED AND LED MATRIX **********/
+        // Show a happy face during normal operation and a sad face after a fall.
+        static int last_matrix_state = -1;
+        if (led_matrix_ready && last_matrix_state != fall_detected)
+        {
+	        fall_detected ? Matrix_ShowSadFace() : Matrix_ShowHappyFace();
+	        last_matrix_state = fall_detected;
+        }
 
-        /*
-        SSD1306_Clear();
-        SSD1306_SetCursor();
-        SSD1306_WriteString();
-        SSD1306_DrawPixel();
-        SSD1306_Update();
+        //
+        static int last_oled_state = -1;
+        if (oled_ready && last_oled_state != fall_detected) {
+    		if (fall_detected)
+    		{
+    			SSD1306_Clear(&oled);
 
-        HT16K33_Clear();
-        HT16K33_SetPixel();
-        HT16K33_SetRow();
-        HT16K33_SetBrightness();
-        HT16K33_SetBlink();
-        HT16K33_Update();
-        */
+    			SSD1306_SetCursor(&oled, 0, 0);
+    			SSD1306_WriteString(&oled, "IVE FALLEN  CALL 995");
+
+    			SSD1306_SetCursor(&oled, 0, 16);
+    			SSD1306_WriteString(&oled, "FAMILY NUM: 8655 4322");
+
+    			SSD1306_SetCursor(&oled, 8, 32);
+    			SSD1306_WriteString(&oled, "NAME: TAN WEI SONG");
+
+    			SSD1306_SetCursor(&oled, 8, 48);
+    			SSD1306_WriteString(&oled, "AGE: 85");
+
+    			SSD1306_Update(&oled);
+    		}
+    		last_oled_state = fall_detected;
+        }
+
+		SSD1306_SetCursor(&oled, 56, 48);
+		char oled_text[24];
+		snprintf(oled_text, sizeof(oled_text), "SOUND: %u", sound_value);
+		SSD1306_WriteString(&oled, oled_text);
+
+		SSD1306_Update(&oled);
+
+		/********** LED2 **********/
+        BSP_LED_Toggle(LED2);
+        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+
+        sample_number++;
     }
 }
 
@@ -406,6 +433,58 @@ static void Buzzer_Set(uint8_t enabled)
         GPIO_PIN_4,
         enabled ? GPIO_PIN_SET : GPIO_PIN_RESET
     );
+}
+
+static void Matrix_ShowFace(const uint8_t face[8][8])
+{
+    HT16K33_Clear(&led_matrix);
+
+    for (uint8_t row = 0; row < 8; row++)
+    {
+        for (uint8_t column = 0; column < 8; column++)
+        {
+            if (face[row][column] != 0)
+            {
+                HT16K33_SetPixel(&led_matrix, row, column, 1);
+            }
+        }
+    }
+
+    HT16K33_Update(&led_matrix);
+}
+
+static void Matrix_ShowHappyFace(void)
+{
+    static const uint8_t happy_face[8][8] =
+    {
+        {0, 0, 1, 1, 1, 1, 0, 0},
+        {0, 1, 0, 0, 0, 0, 1, 0},
+        {1, 0, 1, 0, 0, 1, 0, 1},
+        {1, 0, 0, 0, 0, 0, 0, 1},
+        {1, 0, 1, 0, 0, 1, 0, 1},
+        {1, 0, 0, 1, 1, 0, 0, 1},
+        {0, 1, 0, 0, 0, 0, 1, 0},
+        {0, 0, 1, 1, 1, 1, 0, 0}
+    };
+
+    Matrix_ShowFace(happy_face);
+}
+
+static void Matrix_ShowSadFace(void)
+{
+    static const uint8_t sad_face[8][8] =
+    {
+        {0, 0, 1, 1, 1, 1, 0, 0},
+        {0, 1, 0, 0, 0, 0, 1, 0},
+        {1, 0, 1, 0, 0, 1, 0, 1},
+        {1, 0, 0, 0, 0, 0, 0, 1},
+        {1, 0, 0, 1, 1, 0, 0, 1},
+        {1, 0, 1, 0, 0, 1, 0, 1},
+        {0, 1, 0, 0, 0, 0, 1, 0},
+        {0, 0, 1, 1, 1, 1, 0, 0}
+    };
+
+    Matrix_ShowFace(sad_face);
 }
 
 static uint8_t I2C_DevicePresent(uint16_t address)
