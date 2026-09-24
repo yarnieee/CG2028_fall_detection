@@ -20,9 +20,9 @@
 #include <sys/stat.h>
 
 /*--------------------------- Configuration ----------------------------------*/
-#define EWMA_ALPHA_ACCEL_PERCENT   25
-#define EWMA_ALPHA_GYRO_PERCENT    25
-#define NORMAL_LED_DELAY_MS       1000
+#define EWMA_ALPHA_ACCEL_PERCENT   40
+#define EWMA_ALPHA_GYRO_PERCENT    30
+#define NORMAL_LED_DELAY_MS        1000
 #define FALL_LED_DELAY_MS          150
 
 static void UART1_Init(void);
@@ -56,7 +56,7 @@ static void Matrix_ShowHappyFace(void);
 static void Matrix_ShowSadFace(void);
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display);
-static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_value);
+static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display);
 void HAL_SYSTICK_Callback(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 
@@ -72,9 +72,7 @@ static volatile uint8_t led_timer_enabled = 0;
 static volatile uint8_t reset_requested = 0;
 static volatile uint8_t detector_reset_requested = 0;
 /*=============================== Our Addition ^ ===============================*/
-/**
- * main runs once every N seconds (depending on HAL_Delay at the end)
- */
+
 int main(void) { // THIS ONEEEEEEEEEEE =======================================
     HAL_Init();
     UART1_Init();
@@ -120,6 +118,7 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
 
     unsigned long sample_number = 0;
 
+    // while loop runs once every 20ms
     while (1) {
         int16_t accel_raw_i16[3] = {0, 0, 0};
         float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
@@ -170,7 +169,6 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
             gyro_ewma_asm[1] / 1000.0f,
             gyro_ewma_asm[2] / 1000.0f
         };
-
 
         /*
         char buffer[320];
@@ -246,7 +244,7 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
             detector_reset_requested = 1;
         }
 
-        // Fall detector is called here, every cycle of main (
+        // Fall detector is called here, every cycle of main ()
         FallState fall_state = FallDetector_Update(
             accel_magnitude,
             gyro_magnitude,
@@ -254,46 +252,51 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
             current_time
         );
 
-        int fall_detected = (fall_state == FALLEN_3);
-        //led_fall_mode = (uint8_t) fall_detected;
-        led_fall_mode = 1;
+        int fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
+        led_fall_mode = (uint8_t) fall_detected;
 
 		/*========================== Outputs =================================*/
 
 		/*========================== BUZZER ==================================*/
+        static int buzzer_state = 0;
         if (fall_detected) {
-            Buzzer_Set(1);
+            Buzzer_Set(buzzer_state);
+            buzzer_state = ~buzzer_state;
         } else {
             Buzzer_Set(0);
         }
 
-		/*========================== LED MATRIX ==============================*/
-        // Show a happy face during normal operation and a sad face after a fall.
-        static int last_matrix_state = -1;
-        if (led_matrix_ready && last_matrix_state != fall_detected) {
-        	if (fall_detected) {
-        		Matrix_ShowSadFace();
-        	} else {
-        		Matrix_ShowHappyFace();
-        	}
-	        last_matrix_state = fall_detected;
+		/*=============== UART, LED MATRIX AND OLED ==========================*/
+        static FallState previous_state = NORMAL_0;
+
+        if (fall_state != previous_state) {
+        	if (fall_state == LONG_LIE_4) {
+				UART_Send("LONG LIE ESCALATION: NO MOVEMENT\r\n");
+				if (oled_ready) {
+					OLED_SetLongLieMessage(&oled);
+				}
+			} else if (fall_state == FALLEN_3) {
+                UART_Send("FALL CONFIRMED\r\n");
+                if (led_matrix_ready) {
+	        		Matrix_ShowSadFace();
+				}
+                if (oled_ready) {
+                	OLED_SetFallMessage(&oled);
+                }
+            } else if (fall_state == NORMAL_0) {
+                UART_Send("RESET TO NORMAL\r\n");
+                if (led_matrix_ready) {
+	        		Matrix_ShowHappyFace();
+				}
+                if (oled_ready) {
+                	OLED_SetInitMessage(&oled);
+                }
+            }
+
+            previous_state = fall_state;
         }
 
-		/*========================== OLED MATRIX =============================*/
-        static int last_oled_state = -1;
-        if (oled_ready && last_oled_state != fall_detected) {
-    		if (fall_detected) {
-    			OLED_SetFallMessage(&oled);
-    		} else {
-    			OLED_SetInitMessage(&oled);
-    		}
-
-    		last_oled_state = fall_detected;
-        }
-
-        // Optional update to OLED to display live sound value
-        OLED_SetSoundMessage(&oled, sound_value);
-
+        /*
         char message[256];
         snprintf(message, sizeof(message),
                  "Sample %lu\r\n"
@@ -310,6 +313,30 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
         UART_Send(message);
 
         sample_number++;
+        */
+
+        /*
+        char message[32];
+		snprintf(message, sizeof(message), "State = %d %.3f\r\n", (int)fall_state, accel_magnitude);
+		UART_Send(message);
+		*/
+
+        static uint32_t last_uart_time = 0;
+
+        if ((current_time - last_uart_time) >= 0)
+        {
+            char message[160];
+
+            snprintf(message, sizeof(message),
+            		 "State: %d | Accel: %6.2f | Gyro: %6.2f | Sound: %5u\r\n",
+					 (int)fall_state,
+					 accel_magnitude,
+                     gyro_magnitude,
+                     (unsigned int)sound_value);
+
+            UART_Send(message);
+            last_uart_time = current_time;
+        }
 
         HAL_Delay(20); // 20ms delay for 50 samples per second
         /*=========================== Our Addition ^ ===========================*/
@@ -366,8 +393,7 @@ static void UART1_Init(void)
 }
 
 /*=============================== Our Addition v ===============================*/
-static void External_Peripherals_Init(void)
-{
+static void External_Peripherals_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
     __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -447,8 +473,7 @@ static void External_Peripherals_Init(void)
     HAL_ADC_ConfigChannel(&hadc1, &channel);
     HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 }
-static void I2C_TestDevices(void)
-{
+static void I2C_TestDevices(void) {
     if (I2C_DevicePresent(OLED_ADDR))
     {
         UART_Send("OLED detected\r\n");
@@ -467,8 +492,7 @@ static void I2C_TestDevices(void)
         UART_Send("LED matrix not detected\r\n");
     }
 }
-static uint8_t I2C_DevicePresent(uint16_t address)
-{
+static uint8_t I2C_DevicePresent(uint16_t address) {
     return HAL_I2C_IsDeviceReady(
         &hi2c1,
         address,
@@ -476,8 +500,7 @@ static uint8_t I2C_DevicePresent(uint16_t address)
         100
     ) == HAL_OK;
 }
-static uint16_t SoundSensor_Read(void)
-{
+static uint16_t SoundSensor_Read(void) {
     uint16_t value = 0;
 
     HAL_ADC_Start(&hadc1);
@@ -493,10 +516,7 @@ static uint16_t SoundSensor_Read(void)
 }
 
 /**
- * FallDetector_Update is called by main once every N seconds (depending on HAL_Delay at the end)
- *
- * takes accel_mps (array of floats)
- * gyro_dps (array of floats)
+ * FallDetector_Update is called by main once every 20ms (depending on HAL_Delay at the end)
  *
  * returns FallState
  */
@@ -508,42 +528,50 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 ) {
 	// Tracks fall state
     static FallState state = NORMAL_0;
+
     // Compare against current time to get duration of current state.
     static uint32_t state_start_time = 0;
-    static uint8_t impact_detected   = 0; // Boolean
-    static float accel_baseline_max[3] = {FLT_MIN, FLT_MIN, FLT_MIN};
-    static float accel_baseline_min[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+    static uint32_t last_motion_time = 0;
+    static uint32_t last_impact_sound_time = 0;
 
-    // Sound variables
-    static uint8_t sound_detected = 0; // Boolean
-    static float sound_baseline = 2048.0f;
-    const float LOUD_SOUND_CONST = 300.0f;
-
-    // Quiet samples describes number of records detected as "low activity"
+    // Lound sound samples describes the number of records detected as "loud"
+    static uint16_t loud_sound_samples = 0;
+    // Inactivity samples describes number of records detected as "low activity"
     // Raises chance that the person has fallen and is incapacitated or unconscious
-    static uint16_t quiet_samples = 0;
+    static uint16_t inactivity_samples = 0;
+
+    // Boolean checks
+    static uint8_t impact_sound_detected = 0;
+    static uint8_t movement_detected = 0;
+
+    // Sound variable
+    static float sound_baseline = 1000.0f;
 
     // Threshold constants, used to compare against active values
     const float FREEFALL_MPS2          = 6.00f; // MPS2 is metres per second squared
-    const float IMPACT_MPS2            = 12.00f;
-    const float ACCEL_BASELINE         = 10.00f;
-    const float GYRO_DPS_THRESHOLD_MAX = 60.0f; // DPS is degrees-per-second
-    const float GYRO_DPS_THRESHOLD_MIN = 30.0f; // Threshold for
-    const float ACCEL_DEVIATION        = 0.25f; 
+    const float IMPACT_MPS2            = 12.0f;
+    const float ACCEL_BASELINE         = 10.0f;
+    const float GYRO_DPS_THRESHOLD_MAX = 200.0f; // DPS is degrees-per-second
+    const float GYRO_DPS_THRESHOLD_MIN = 30.0f; // Threshold for checking
+    const float MAX_SOUND_DIFF         = 2000.0f;
 
-    const uint32_t NEAR_FALL_TIMEOUT_MS = 1000U;
-    const uint32_t CANDIDATE_TIMEOUT_MS = 10000U;
-    const uint32_t LONG_LIE_TIMEOUT_MS = 300000U; //5 minute timeout
-    const uint16_t MIN_NUM_OF_QUIET_SAMPLES = 15U;
-
-
+    const uint32_t IMPACT_SOUND_TIMEOUT_MS = 5000U;   // 5 second timeout
+    const uint32_t NEAR_FALL_TIMEOUT_MS    = 1000U;   // 1 second timeout
+    const uint32_t CANDIDATE_TIMEOUT_MS    = 5000U;   // 5 second timeout
+    //const uint32_t LONG_LIE_TIMEOUT_MS     = 300000U; // 5 minute timeout
+    const uint32_t LONG_LIE_TIMEOUT_MS     = 5000U;
+    const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 100U;
+    const uint16_t MIN_NUM_OF_LOUD_SOUND_SAMPLES = 5U;
 
     if (detector_reset_requested) {
         state = NORMAL_0;
-        state_start_time = 0;
-        impact_detected = 0;
-        sound_detected = 0;
-        quiet_samples = 0;
+        state_start_time       = 0;
+        last_motion_time       = 0;
+        last_impact_sound_time = 0;
+        loud_sound_samples     = 0;
+        inactivity_samples     = 0;
+        impact_sound_detected  = 0;
+        movement_detected      = 0;
         sound_baseline = 2048.0f;
 
         detector_reset_requested = 0;
@@ -554,72 +582,67 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     float sound_difference = fabsf((float)sound_value - sound_baseline);
 
-    uint8_t loud_sound = (sound_difference > LOUD_SOUND_CONST);
+    if (sound_difference > MAX_SOUND_DIFF) {
+    	loud_sound_samples++;
+    } else {
+    	loud_sound_samples = 0;
+    }
+
+    if (loud_sound_samples >= MIN_NUM_OF_LOUD_SOUND_SAMPLES) {
+    	impact_sound_detected = 1;
+    	last_impact_sound_time = current_time;
+    }
+
+    if ((current_time - last_impact_sound_time) > IMPACT_SOUND_TIMEOUT_MS) {
+    	impact_sound_detected = 0;
+    	last_impact_sound_time = current_time;
+    }
+
+    // Whether elderly is moving is based on the rotational speed and acceleration at rest
+    movement_detected =
+    	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+		(accel_mps2 < ACCEL_BASELINE - 3.0f) ||
+		(accel_mps2 > ACCEL_BASELINE + 3.0f);
 
     switch (state) {
     case NORMAL_0:
         if (accel_mps2 < FREEFALL_MPS2 || gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
             state = FREEFALL_1;
             state_start_time = current_time;
-
-        } else {
-        	if (accel_mps2 > IMPACT_MPS2) {
-				impact_detected = 1;
-				state = IMPACT_2;
-				state_start_time = current_time;
-				quiet_samples = 0;
-
-			}
-
-        	if (accel_mps2 > accel_baseline_max) {
-        		accel_baseline_max = accel_mps2;
-        	}
-
-        	if (accel_mps2 < accel_baseline_min) {
-				accel_baseline_min = accel_mps2;
-			}
         }
+        /*
+        else if (accel_mps2 > IMPACT_MPS2 || impact_sound_detected) {
+			state = IMPACT_2;
+			state_start_time = current_time;
+        }
+        */
 
         break;
 
     case FREEFALL_1:
-        if (loud_sound) {
-            sound_detected = 1;
-        }
-
-        if (accel_mps2 > IMPACT_MPS2) {
+        if (accel_mps2 > IMPACT_MPS2 || impact_sound_detected) {
             state = IMPACT_2;
             state_start_time = current_time;
-
         } else if ((current_time - state_start_time) > NEAR_FALL_TIMEOUT_MS) {
             detector_reset_requested = 1;
-
         }
 
         break;
 
     case IMPACT_2:
-        if (loud_sound) {
-            sound_detected = 1;
-        }
-
         // Person is relatively still after the possible impact.
-        if (gyro_dps < GYRO_DPS_THRESHOLD_MIN &&
-            accel_mps2 > ACCEL_BASELINE - 3.00f &&
-            accel_mps2 < ACCEL_BASELINE + 3.00f) {
-            quiet_samples++;
+        if (!movement_detected) {
+            inactivity_samples++;
         } else {
-            quiet_samples = 0;
+            inactivity_samples = 0;
         }
 
         if ((current_time - state_start_time) > CANDIDATE_TIMEOUT_MS) {
-            // Confirmed fall only if...
-        	// 1. An impact occurred
-        	// 2. AND he person became still
-            // 3. AND Rotation or sound supports the event
-            if (quiet_samples >= MIN_NUM_OF_QUIET_SAMPLES) {
+            // Confirmed fall only if the person became still for an extended period of time
+            if (inactivity_samples >= MIN_NUM_OF_INACTIVITY_SAMPLES) {
                 state = FALLEN_3;
                 state_start_time = current_time;
+                last_motion_time = current_time;
             } else {
                 detector_reset_requested = 1;
             }
@@ -628,12 +651,16 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
         break;
 
     case FALLEN_3:
-    	if ((current_time - state_start_time) > LONG_LIE_TIMEOUT_MS) {
-    		state = LONG_LIE_4;
-			state_start_time = current_time;
-    	}
-        
+        if (movement_detected) {
+            // The person moved, so restart the long-lie timer.
+            last_motion_time = current_time;
+        } else if ((current_time - last_motion_time) >= LONG_LIE_TIMEOUT_MS) {
+            state = LONG_LIE_4;
+            state_start_time = current_time;
+        }
+
         break;
+
     case LONG_LIE_4:
         // Stay confirmed until the user resets the device
     	break;
@@ -641,16 +668,16 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     return state;
 }
-static void Buzzer_Set(uint8_t enabled)
-{
+
+static void Buzzer_Set(uint8_t enabled) {
     HAL_GPIO_WritePin(
         GPIOB,
         GPIO_PIN_4,
         enabled ? GPIO_PIN_SET : GPIO_PIN_RESET
     );
 }
-static void Matrix_ShowFace(const uint8_t face[8][8])
-{
+
+static void Matrix_ShowFace(const uint8_t face[8][8]) {
     HT16K33_Clear(&led_matrix);
 
     for (uint8_t row = 0; row < 8; row++) {
@@ -691,8 +718,8 @@ static void Matrix_ShowSadFace(void) {
 
     Matrix_ShowFace(sad_face);
 }
-static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display)
-{
+
+static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Clear(display);
     SSD1306_SetCursor(display, 16, 0);
     SSD1306_WriteString(display, "FALL DETECTOR");
@@ -700,8 +727,7 @@ static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display)
     SSD1306_WriteString(display, "SYSTEM READY");
     SSD1306_Update(display);
 }
-static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display)
-{
+static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display) {
 	SSD1306_Clear(display);
 	SSD1306_SetCursor(display, 0, 0);
 	SSD1306_WriteString(display, "IVE FALLEN  CALL 995");
@@ -713,16 +739,17 @@ static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display)
 	SSD1306_WriteString(display, "AGE: 85");
 	SSD1306_Update(display);
 }
-static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_value)
-{
-	SSD1306_SetCursor(&oled, 56, 48);
-	char oled_text[24];
-	snprintf(oled_text, sizeof(oled_text), "SOUND: %u", sound_value);
-	SSD1306_WriteString(&oled, oled_text);
-	SSD1306_Update(&oled);
+static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display) {
+    SSD1306_Clear(display);
+    SSD1306_SetCursor(display, 16, 0);
+    SSD1306_WriteString(display, "NO MOVEMENT");
+    SSD1306_SetCursor(display, 16, 16);
+    SSD1306_WriteString(display, "LONG LIE ALERT");
+    SSD1306_SetCursor(display, 16, 32);
+    SSD1306_WriteString(display, "CALL 995");
+    SSD1306_Update(display);
 }
-void HAL_SYSTICK_Callback(void)
-{
+void HAL_SYSTICK_Callback(void) {
 	// NOTE: must add "HAL_SYSTICK_IRQHandler();" to
 	// "void SysTick_Handler(void)" in stm32l4xx.it.c
 
@@ -752,8 +779,7 @@ void HAL_SYSTICK_Callback(void)
         BSP_LED_Toggle(LED2);
     }
 }
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     static uint32_t last_press_time = 0;
     uint32_t current_time = HAL_GetTick();
 
@@ -772,9 +798,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 /* Do not modify these lines. They suppress UART-related warnings. */
 int _write(int file, char *ptr, int len)
 {
-    (void)file;
-    (void)ptr;
-    return len;
+	(void)file;
+	(void)ptr;
+	return len;
 }
 int _read(int file, char *ptr, int len) { (void)file; (void)ptr; (void)len; return 0; }
 int _fstat(int file, struct stat *st) { (void)file; (void)st; return 0; }
