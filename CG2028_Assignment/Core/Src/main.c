@@ -37,13 +37,12 @@ UART_HandleTypeDef huart1;
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
 
-typedef enum FallState
-{
+typedef enum FallState {
     NORMAL_0,
     FREEFALL_1,
     IMPACT_2,
     FALLEN_3,
-	LONG LIE_4
+	LONG_LIE_4
 } FallState;
 
 static void External_Peripherals_Init(void);
@@ -630,12 +629,12 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     case FALLEN_3:
     	if ((current_time - state_start_time) > LONG_LIE_TIMEOUT_MS) {
-    		state = LONG LIE_4;
+    		state = LONG_LIE_4;
 			state_start_time = current_time;
     	}
         
         break;
-    case LONG LIE_4:
+    case LONG_LIE_4:
         // Stay confirmed until the user resets the device
     	break;
     }
