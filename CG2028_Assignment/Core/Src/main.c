@@ -66,6 +66,8 @@ static uint8_t led_matrix_ready = 0;
 
 static volatile uint8_t led_fall_mode = 0;
 static volatile uint8_t led_timer_enabled = 0;
+static volatile uint8_t reset_requested = 0;
+static volatile uint8_t detector_reset_requested = 0;
 /*============================== Our Addition =================================*/
 
 int main(void)
@@ -77,7 +79,10 @@ int main(void)
     BSP_ACCELERO_Init();
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
+
+    /*============================== Our Addition =================================*/
     led_timer_enabled = 1;
+    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
 	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION =======*/
     External_Peripherals_Init();
@@ -226,6 +231,27 @@ int main(void)
         uint32_t current_time = HAL_GetTick();
 
 		/*===================== Process Input Readings ==============================*/
+        if (reset_requested)
+        {
+        	sample_number = 0;
+            led_fall_mode = 0;
+            Buzzer_Set(0);
+            BSP_LED_Off(LED2);
+
+            if (led_matrix_ready)
+            {
+                Matrix_ShowHappyFace();
+            }
+
+            if (oled_ready)
+            {
+                OLED_SetInitMessage(&oled);
+            }
+
+            reset_requested = 0;
+            detector_reset_requested = 1;
+        }
+
         FallState fall_state = FallDetector_Update(
             accel_g,
             //accel_mps2,
@@ -504,6 +530,20 @@ static FallState FallDetector_Update(
     const uint32_t NEAR_FALL_TIMEOUT_MS = 1000U;
     const uint32_t CANDIDATE_TIMEOUT_MS = 1500U;
 
+    if (detector_reset_requested)
+    {
+        state = FALL_NORMAL;
+        state_start_time = 0;
+        peak_gyro = 0.0f;
+        impact_detected = 0;
+        sound_detected = 0;
+        quiet_samples = 0;
+
+        sound_baseline = 2048.0f;
+
+        detector_reset_requested = 0;
+    }
+
     // Estimate the normal sound level.
     sound_baseline = (0.99f * sound_baseline) + (0.01f * (float)sound_value);
 
@@ -735,6 +775,21 @@ void HAL_SYSTICK_Callback(void)
     }
 }
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    static uint32_t last_press_time = 0;
+    uint32_t current_time = HAL_GetTick();
+
+    if (GPIO_Pin == BUTTON_EXTI13_Pin)
+    {
+        // Ignore switch bounce for 250 ms
+        if ((current_time - last_press_time) > 250U)
+        {
+            reset_requested = 1;
+            last_press_time = current_time;
+        }
+    }
+}
 
 /* Do not modify these lines. They suppress UART-related warnings. */
 int _write(int file, char *ptr, int len)
