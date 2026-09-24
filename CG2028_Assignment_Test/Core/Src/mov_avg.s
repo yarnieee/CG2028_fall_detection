@@ -14,8 +14,8 @@
 
 @ CG2028 Assignment
 @ (c) ECE NUS
-@ Write Student 1's Name here: ABCD (A1234567R)
-@ Write Student 2's Name here: WXYZ (A0000007X)
+@ Write Student 1's Name here: Leon Matthew Wei (A0320416U)
+@ Write Student 2's Name here: Li Yi An (A0334942B)
 @
 @ Function prototype:
 @   int ewma_filter(int new_data, int old_output, int alpha_percent);
