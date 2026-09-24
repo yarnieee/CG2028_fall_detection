@@ -32,27 +32,38 @@ extern int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 
 UART_HandleTypeDef huart1;
 
-ADC_HandleTypeDef hadc1;
-I2C_HandleTypeDef hi2c1;
-
+/*============================== Our Addition =================================*/
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
 
+typedef enum FallState
+{
+    FALL_NORMAL,
+    FALL_NEAR_FALL,
+    FALL_CANDIDATE,
+    FALL_CONFIRMED
+} FallState;
+
 static void External_Peripherals_Init(void);
-
-static uint16_t SoundSensor_Read(void);
-static void Buzzer_Set(uint8_t enabled);
-
-static uint8_t I2C_DevicePresent(uint16_t address);
 static void I2C_TestDevices(void);
+static uint8_t I2C_DevicePresent(uint16_t address);
+static uint16_t SoundSensor_Read(void);
+static FallState FallDetector_Update(float accel_g, float gyro_dps, uint16_t sound_value, uint32_t current_time);
+static void Buzzer_Set(uint8_t enabled);
 static void Matrix_ShowFace(const uint8_t face[8][8]);
 static void Matrix_ShowHappyFace(void);
 static void Matrix_ShowSadFace(void);
+static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display);
+static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display);
+static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_value);
 
+ADC_HandleTypeDef hadc1;
+I2C_HandleTypeDef hi2c1;
 static SSD1306_HandleTypeDef oled;
 static HT16K33_HandleTypeDef led_matrix;
 static uint8_t oled_ready = 0;
 static uint8_t led_matrix_ready = 0;
+/*============================== Our Addition =================================*/
 
 int main(void)
 {
@@ -64,18 +75,13 @@ int main(void)
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
 
-	/********** SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION **********/
+	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION =======*/
     External_Peripherals_Init();
     I2C_TestDevices();
 
     if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK)
     {
-        SSD1306_Clear(&oled);
-        SSD1306_SetCursor(&oled, 16, 0);
-        SSD1306_WriteString(&oled, "FALL DETECTOR");
-        SSD1306_SetCursor(&oled, 16, 32);
-        SSD1306_WriteString(&oled, "SYSTEM READY");
-        SSD1306_Update(&oled);
+    	OLED_SetInitMessage(&oled);
         oled_ready = 1;
     }
     else
@@ -95,11 +101,11 @@ int main(void)
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
-    int gyro_ewma_asm[3]  = {0, 0, 0};
+    int  gyro_ewma_asm[3] = {0, 0, 0};
 
     /* Reference C states are kept separately for assembly verification. */
     int accel_ewma_c[3] = {0, 0, 0};
-    int gyro_ewma_c[3]  = {0, 0, 0};
+    int  gyro_ewma_c[3] = {0, 0, 0};
 
     unsigned long sample_number = 0;
 
@@ -154,6 +160,7 @@ int main(void)
             gyro_ewma_asm[2] / 1000.0f
         };
 
+        /*
         char buffer[320];
         snprintf(buffer, sizeof(buffer),
                  "Sample %lu\r\n"
@@ -163,9 +170,11 @@ int main(void)
                  accel_mps2[0], accel_mps2[1], accel_mps2[2],
                  gyro_dps[0], gyro_dps[1], gyro_dps[2]);
         UART_Send(buffer);
+        */
 
         /* Optional debugging check. This confirms that the assembly routine
          * matches the reference C routine for the current samples. */
+        /*
         if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
             (accel_ewma_asm[1] != accel_ewma_c[1]) ||
             (accel_ewma_asm[2] != accel_ewma_c[2]) ||
@@ -175,6 +184,7 @@ int main(void)
         {
             UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
         }
+        */
 
         /**************** Elderly wearable state logic starts here************************
          * Compulsory requirements:
@@ -186,99 +196,98 @@ int main(void)
 
         /* TODO: replace with your fall-detection logic */
 
-        static int fall_detected = 0;
+		/*===================== Input Readings ==============================*/
 
-		/********** ACCELEROMETER AND GYROSCOPE **********/
+        float accel_magnitude =
+            sqrtf(accel_mps2[0] * accel_mps2[0] +
+                  accel_mps2[1] * accel_mps2[1] +
+                  accel_mps2[2] * accel_mps2[2]);
 
-        float accel_rms = sqrtf((
-        		accel_mps2[0] * accel_mps2[0] +
-        		accel_mps2[1] * accel_mps2[1] +
-				accel_mps2[2] * accel_mps2[2]
-		) / 3.0f);
+        float accel_g = accel_magnitude / 9.80665f;
 
-        float gyro_rms = sqrtf((
-        		gyro_dps[0] * gyro_dps[0] +
-				gyro_dps[1] * gyro_dps[1] +
-				gyro_dps[2] * gyro_dps[2]
-        ) / 3.0f);
+        float gyro_magnitude =
+            sqrtf(gyro_dps[0] * gyro_dps[0] +
+                  gyro_dps[1] * gyro_dps[1] +
+                  gyro_dps[2] * gyro_dps[2]);
 
-        // @yarnieee TODO: Implement algorithm that distinguishes
-        // normal activity,
-        // near-fall movements,
-        // and a real fall
-
-        if (accel_rms > 15.0 || gyro_rms > 40.0)
-        {
-        	fall_detected = 1;
-        }
-
-		/********** Enhancements For The Elderly Wearable Device **********/
-
-		/********** SOUND SENSOR AND BUZZER **********/
         uint16_t sound_value = SoundSensor_Read();
 
-        if (sound_value > 2500)
+        /*
+        char message[80];
+		snprintf(message, sizeof(message), "Sound ADC = %u\r\n", sound_value);
+		UART_Send(message);
+		*/
+
+        uint32_t current_time = HAL_GetTick();
+
+		/*===================== Process Input Readings ==============================*/
+        FallState fall_state = FallDetector_Update(
+            accel_g,
+            gyro_magnitude,
+            sound_value,
+            current_time
+        );
+
+        int fall_detected = (fall_state == FALL_CONFIRMED);
+
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "Sample %lu\r\n"
+                 "Accel_G        = %.3f\r\n"
+                 "Gyro_Magnitude = %.3f\r\n"
+        		 "Sound ADC      = %u\r\n"
+        		 "Fall State     = %d\r\n"
+        		 "======================\r\n",
+                 sample_number,
+                 accel_g,
+                 gyro_magnitude,
+				 (unsigned int)sound_value,
+				 (int)fall_state);
+        UART_Send(message);
+
+		/*========================== Outputs =============================*/
+
+        // Buzzer
+        if (fall_detected)
         {
             Buzzer_Set(1);
-            fall_detected = 1;
         }
         else
         {
             Buzzer_Set(0);
         }
 
-        char message[80];
-        snprintf(
-            message,
-            sizeof(message),
-            "Sound ADC = %u\r\n",
-            sound_value
-        );
-        UART_Send(message);
-
-		/********** OLED AND LED MATRIX **********/
+        // LED Matrix
         // Show a happy face during normal operation and a sad face after a fall.
         static int last_matrix_state = -1;
         if (led_matrix_ready && last_matrix_state != fall_detected)
         {
-	        fall_detected ? Matrix_ShowSadFace() : Matrix_ShowHappyFace();
+        	if (fall_detected)
+        	{
+        		Matrix_ShowSadFace();
+        	}
+        	else
+        	{
+        		Matrix_ShowHappyFace();
+        	}
 	        last_matrix_state = fall_detected;
         }
 
-        //
+        // OLED
         static int last_oled_state = -1;
         if (oled_ready && last_oled_state != fall_detected) {
     		if (fall_detected)
     		{
-    			SSD1306_Clear(&oled);
-
-    			SSD1306_SetCursor(&oled, 0, 0);
-    			SSD1306_WriteString(&oled, "IVE FALLEN  CALL 995");
-
-    			SSD1306_SetCursor(&oled, 0, 16);
-    			SSD1306_WriteString(&oled, "FAMILY NUM: 8655 4322");
-
-    			SSD1306_SetCursor(&oled, 8, 32);
-    			SSD1306_WriteString(&oled, "NAME: TAN WEI SONG");
-
-    			SSD1306_SetCursor(&oled, 8, 48);
-    			SSD1306_WriteString(&oled, "AGE: 85");
-
-    			SSD1306_Update(&oled);
+    			OLED_SetFallMessage(&oled);
     		}
     		last_oled_state = fall_detected;
         }
+        OLED_SetSoundMessage(&oled, sound_value);
 
-		SSD1306_SetCursor(&oled, 56, 48);
-		char oled_text[24];
-		snprintf(oled_text, sizeof(oled_text), "SOUND: %u", sound_value);
-		SSD1306_WriteString(&oled, oled_text);
-
-		SSD1306_Update(&oled);
-
-		/********** LED2 **********/
+		/*================ LED2 ===================*/
         BSP_LED_Toggle(LED2);
-        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+        // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+        HAL_Delay(NORMAL_LED_DELAY_MS);
 
         sample_number++;
     }
@@ -327,6 +336,7 @@ static void UART1_Init(void)
         while (1) { }
     }
 }
+
 
 static void External_Peripherals_Init(void)
 {
@@ -410,6 +420,37 @@ static void External_Peripherals_Init(void)
     HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 }
 
+static void I2C_TestDevices(void)
+{
+    if (I2C_DevicePresent(OLED_ADDR))
+    {
+        UART_Send("OLED detected\r\n");
+    }
+    else
+    {
+        UART_Send("OLED not detected\r\n");
+    }
+
+    if (I2C_DevicePresent(MATRIX_ADDR))
+    {
+        UART_Send("LED matrix detected\r\n");
+    }
+    else
+    {
+        UART_Send("LED matrix not detected\r\n");
+    }
+}
+
+static uint8_t I2C_DevicePresent(uint16_t address)
+{
+    return HAL_I2C_IsDeviceReady(
+        &hi2c1,
+        address,
+        2,
+        100
+    ) == HAL_OK;
+}
+
 static uint16_t SoundSensor_Read(void)
 {
     uint16_t value = 0;
@@ -424,6 +465,134 @@ static uint16_t SoundSensor_Read(void)
     HAL_ADC_Stop(&hadc1);
 
     return value;       /* 0 to 4095 */
+}
+
+static FallState FallDetector_Update(
+    float accel_g,
+    float gyro_dps,
+    uint16_t sound_value,
+    uint32_t current_time
+)
+{
+    static FallState state = FALL_NORMAL;
+    static uint32_t state_start_time = 0;
+    static float peak_gyro = 0.0f;
+    static uint8_t impact_detected = 0;
+    static uint8_t sound_detected = 0;
+    static uint16_t quiet_samples = 0;
+
+    static float sound_baseline = 2048.0f;
+
+    const float FREEFALL_G = 0.55f;
+    const float IMPACT_G = 1.30f;
+    const float ROTATION_DPS = 180.0f;
+    const float QUIET_GYRO_DPS = 30.0f;
+
+    const uint32_t NEAR_FALL_TIMEOUT_MS = 1000U;
+    const uint32_t CANDIDATE_TIMEOUT_MS = 1500U;
+
+    // Estimate the normal sound level.
+    sound_baseline = (0.99f * sound_baseline) + (0.01f * (float)sound_value);
+
+    float sound_difference = fabsf((float)sound_value - sound_baseline);
+
+    uint8_t loud_sound = (sound_difference > 300.0f);
+
+    if (gyro_dps > peak_gyro)
+    {
+        peak_gyro = gyro_dps;
+    }
+
+    switch (state)
+    {
+    case FALL_NORMAL:
+
+        if (accel_g < FREEFALL_G ||
+            gyro_dps > ROTATION_DPS)
+        {
+            state = FALL_NEAR_FALL;
+            state_start_time = current_time;
+            peak_gyro = gyro_dps;
+            impact_detected = 0;
+            sound_detected = loud_sound;
+            quiet_samples = 0;
+        }
+
+        break;
+
+    case FALL_NEAR_FALL:
+
+        if (gyro_dps > peak_gyro)
+        {
+            peak_gyro = gyro_dps;
+        }
+
+        if (loud_sound)
+        {
+            sound_detected = 1;
+        }
+
+        if (accel_g > IMPACT_G)
+        {
+            impact_detected = 1;
+            state = FALL_CANDIDATE;
+            state_start_time = current_time;
+            quiet_samples = 0;
+        }
+        else if ((current_time - state_start_time) > NEAR_FALL_TIMEOUT_MS)
+        {
+            state = FALL_NORMAL;
+        }
+
+        break;
+
+    case FALL_CANDIDATE:
+
+        if (gyro_dps > peak_gyro)
+        {
+            peak_gyro = gyro_dps;
+        }
+
+        if (loud_sound)
+        {
+            sound_detected = 1;
+        }
+
+        // Person is relatively still after the possible impact.
+        if (gyro_dps < QUIET_GYRO_DPS && accel_g > 0.75f && accel_g < 1.25f)
+        {
+            quiet_samples++;
+        }
+        else
+        {
+            quiet_samples = 0;
+        }
+
+        if ((current_time - state_start_time) > CANDIDATE_TIMEOUT_MS)
+        {
+            // Confirmed fall only if...
+        	// 1. An impact occurred
+        	// 2. AND he person became still
+            // 3. AND Rotation or sound supports the event
+            if (impact_detected && quiet_samples >= 25U &&
+            	(peak_gyro > ROTATION_DPS || sound_detected))
+            {
+                state = FALL_CONFIRMED;
+            }
+            else
+            {
+                state = FALL_NORMAL;
+            }
+        }
+
+        break;
+
+    case FALL_CONFIRMED:
+        // Stay confirmed until the user resets the device
+        break;
+    }
+
+    return state;
 }
 
 static void Buzzer_Set(uint8_t enabled)
@@ -487,36 +656,38 @@ static void Matrix_ShowSadFace(void)
     Matrix_ShowFace(sad_face);
 }
 
-static uint8_t I2C_DevicePresent(uint16_t address)
+static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display)
 {
-    return HAL_I2C_IsDeviceReady(
-        &hi2c1,
-        address,
-        2,
-        100
-    ) == HAL_OK;
+    SSD1306_Clear(display);
+    SSD1306_SetCursor(display, 16, 0);
+    SSD1306_WriteString(display, "FALL DETECTOR");
+    SSD1306_SetCursor(display, 16, 32);
+    SSD1306_WriteString(display, "SYSTEM READY");
+    SSD1306_Update(display);
+}
+static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display)
+{
+	SSD1306_Clear(display);
+	SSD1306_SetCursor(display, 0, 0);
+	SSD1306_WriteString(display, "IVE FALLEN  CALL 995");
+	SSD1306_SetCursor(display, 0, 16);
+	SSD1306_WriteString(display, "FAMILY NUM: 8655 4322");
+	SSD1306_SetCursor(display, 8, 32);
+	SSD1306_WriteString(display, "NAME: TAN WEI SONG");
+	SSD1306_SetCursor(display, 8, 48);
+	SSD1306_WriteString(display, "AGE: 85");
+	SSD1306_Update(display);
+}
+static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_value)
+{
+	SSD1306_SetCursor(&oled, 56, 48);
+	char oled_text[24];
+	snprintf(oled_text, sizeof(oled_text), "SOUND: %u", sound_value);
+	SSD1306_WriteString(&oled, oled_text);
+	SSD1306_Update(&oled);
 }
 
-static void I2C_TestDevices(void)
-{
-    if (I2C_DevicePresent(OLED_ADDR))
-    {
-        UART_Send("OLED detected\r\n");
-    }
-    else
-    {
-        UART_Send("OLED not detected\r\n");
-    }
 
-    if (I2C_DevicePresent(MATRIX_ADDR))
-    {
-        UART_Send("LED matrix detected\r\n");
-    }
-    else
-    {
-        UART_Send("LED matrix not detected\r\n");
-    }
-}
 
 /* Do not modify these lines. They suppress UART-related warnings. */
 int _write(int file, char *ptr, int len)
