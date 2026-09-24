@@ -63,6 +63,9 @@ static SSD1306_HandleTypeDef oled;
 static HT16K33_HandleTypeDef led_matrix;
 static uint8_t oled_ready = 0;
 static uint8_t led_matrix_ready = 0;
+
+static volatile uint8_t led_fall_mode = 0;
+static volatile uint8_t led_timer_enabled = 0;
 /*============================== Our Addition =================================*/
 
 int main(void)
@@ -74,6 +77,7 @@ int main(void)
     BSP_ACCELERO_Init();
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
+    led_timer_enabled = 1;
 
 	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION =======*/
     External_Peripherals_Init();
@@ -203,7 +207,8 @@ int main(void)
                   accel_mps2[1] * accel_mps2[1] +
                   accel_mps2[2] * accel_mps2[2]);
 
-        float accel_g = (accel_magnitude - accel_baseline) / 9.80665f;
+        float accel_g = accel_magnitude / 9.80665f;
+        // float accel_g = (accel_magnitude - accel_baseline) / 9.80665f;
 
         float gyro_magnitude =
             sqrtf(gyro_dps[0] * gyro_dps[0] +
@@ -223,14 +228,16 @@ int main(void)
 		/*===================== Process Input Readings ==============================*/
         FallState fall_state = FallDetector_Update(
             accel_g,
-            accel_mps2,
-            gyro_dps,
+            //accel_mps2,
+            //gyro_dps,
             gyro_magnitude,
             sound_value,
             current_time
         );
 
         int fall_detected = (fall_state == FALL_CONFIRMED);
+        //led_fall_mode = (uint8_t) fall_detected;
+        led_fall_mode = 1;
 
         char message[256];
         snprintf(message, sizeof(message),
@@ -287,7 +294,7 @@ int main(void)
         OLED_SetSoundMessage(&oled, sound_value);
 
 		/*================ LED2 ===================*/
-        BSP_LED_Toggle(LED2);
+        // BSP_LED_Toggle(LED2);
         // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         HAL_Delay(NORMAL_LED_DELAY_MS);
 
@@ -471,8 +478,8 @@ static uint16_t SoundSensor_Read(void)
 
 static FallState FallDetector_Update(
     float accel_g,
-    float *accel_mps2,
-    float *gyro_readings,
+    //float accel_mps2[],
+    //float gyro_readings[],
     float gyro_dps,
     uint16_t sound_value,
     uint32_t current_time
@@ -484,8 +491,8 @@ static FallState FallDetector_Update(
     static uint8_t impact_detected = 0;
     static uint8_t sound_detected = 0;
     static uint16_t quiet_samples = 0;
-    static float accel_baseline[3] = {0, 0, 0};
-    static float gyro_baseline[3] = {0, 0, 0};
+    //static float accel_baseline[3] = {0, 0, 0};
+    //static float gyro_baseline[3] = {0, 0, 0};
 
     static float sound_baseline = 2048.0f;
 
@@ -504,9 +511,9 @@ static FallState FallDetector_Update(
 
     uint8_t loud_sound = (sound_difference > 300.0f);
 
-    if (gyro_magnitude > peak_gyro)
+    if (gyro_dps > peak_gyro)
     {
-        peak_gyro = gyro_readings;
+        peak_gyro = gyro_dps;
     }
 
     switch (state)
@@ -523,8 +530,8 @@ static FallState FallDetector_Update(
             sound_detected = loud_sound;
             quiet_samples = 0;
         } else {
-            accel_baseline = accel_mps2;
-            gyro_baseline = gyro_dps;
+            //accel_baseline = accel_mps2;
+            //gyro_baseline = gyro_dps;
         }
 
         break;
@@ -696,6 +703,37 @@ static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_
 	SSD1306_Update(&oled);
 }
 
+void HAL_SYSTICK_Callback(void)
+{
+	// NOTE: must add "HAL_SYSTICK_IRQHandler();" to
+	// "void SysTick_Handler(void)" in stm32l4xx.it.c
+
+    static uint32_t elapsed_ms = 0;
+    static uint8_t previous_mode = 0xFF;
+
+    if (!led_timer_enabled)
+    {
+        return;
+    }
+
+    // Restart the timing when the fall state changes
+    if (led_fall_mode != previous_mode)
+    {
+        elapsed_ms = 0;
+        previous_mode = led_fall_mode;
+        BSP_LED_Off(LED2);
+    }
+
+    elapsed_ms++;
+
+    uint32_t toggle_period = led_fall_mode ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS;
+
+    if (elapsed_ms >= toggle_period)
+    {
+        elapsed_ms = 0;
+        BSP_LED_Toggle(LED2);
+    }
+}
 
 
 /* Do not modify these lines. They suppress UART-related warnings. */
