@@ -39,11 +39,11 @@ UART_HandleTypeDef huart1;
 
 typedef enum FallState
 {
-    0_NORMAL,
-    1_FREEFALL,
-    2_IMPACT,
-    3_FALLEN,
-	4_LONG_LIE
+    NORMAL_0,
+    FREEFALL_1,
+    IMPACT_2,
+    FALLEN_3,
+	LONG LIE_4
 } FallState;
 
 static void External_Peripherals_Init(void);
@@ -255,7 +255,7 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
             current_time
         );
 
-        int fall_detected = (fall_state == 3_FALLEN);
+        int fall_detected = (fall_state == FALLEN_3);
         //led_fall_mode = (uint8_t) fall_detected;
         led_fall_mode = 1;
 
@@ -508,7 +508,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
     uint32_t current_time
 ) {
 	// Tracks fall state
-    static FallState state = 0_NORMAL;
+    static FallState state = NORMAL_0;
     // Compare against current time to get duration of current state.
     static uint32_t state_start_time = 0;
     static uint8_t impact_detected   = 0; // Boolean
@@ -540,7 +540,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
 
     if (detector_reset_requested) {
-        state = 0_NORMAL;
+        state = NORMAL_0;
         state_start_time = 0;
         impact_detected = 0;
         sound_detected = 0;
@@ -558,15 +558,15 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
     uint8_t loud_sound = (sound_difference > LOUD_SOUND_CONST);
 
     switch (state) {
-    case 0_NORMAL:
+    case NORMAL_0:
         if (accel_mps2 < FREEFALL_MPS2 || gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
-            state = 1_FREEFALL;
+            state = FREEFALL_1;
             state_start_time = current_time;
 
         } else {
         	if (accel_mps2 > IMPACT_MPS2) {
 				impact_detected = 1;
-				state = 2_IMPACT;
+				state = IMPACT_2;
 				state_start_time = current_time;
 				quiet_samples = 0;
 
@@ -583,13 +583,13 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
         break;
 
-    case 1_FREEFALL:
+    case FREEFALL_1:
         if (loud_sound) {
             sound_detected = 1;
         }
 
         if (accel_mps2 > IMPACT_MPS2) {
-            state = 2_IMPACT;
+            state = IMPACT_2;
             state_start_time = current_time;
 
         } else if ((current_time - state_start_time) > NEAR_FALL_TIMEOUT_MS) {
@@ -599,7 +599,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
         break;
 
-    case 2_IMPACT:
+    case IMPACT_2:
         if (loud_sound) {
             sound_detected = 1;
         }
@@ -619,7 +619,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
         	// 2. AND he person became still
             // 3. AND Rotation or sound supports the event
             if (quiet_samples >= MIN_NUM_OF_QUIET_SAMPLES) {
-                state = 3_FALLEN;
+                state = FALLEN_3;
                 state_start_time = current_time;
             } else {
                 detector_reset_requested = 1;
@@ -628,14 +628,14 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
         break;
 
-    case 3_FALLEN:
+    case FALLEN_3:
     	if ((current_time - state_start_time) > LONG_LIE_TIMEOUT_MS) {
-    		state = 4_LONG_LIE;
+    		state = LONG LIE_4;
 			state_start_time = current_time;
     	}
         
         break;
-    case 4_LONG_LIE:
+    case LONG LIE_4:
         // Stay confirmed until the user resets the device
     	break;
     }
