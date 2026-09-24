@@ -203,7 +203,7 @@ int main(void)
                   accel_mps2[1] * accel_mps2[1] +
                   accel_mps2[2] * accel_mps2[2]);
 
-        float accel_g = accel_magnitude / 9.80665f;
+        float accel_g = (accel_magnitude - accel_baseline) / 9.80665f;
 
         float gyro_magnitude =
             sqrtf(gyro_dps[0] * gyro_dps[0] +
@@ -223,6 +223,8 @@ int main(void)
 		/*===================== Process Input Readings ==============================*/
         FallState fall_state = FallDetector_Update(
             accel_g,
+            accel_mps2,
+            gyro_dps,
             gyro_magnitude,
             sound_value,
             current_time
@@ -469,6 +471,8 @@ static uint16_t SoundSensor_Read(void)
 
 static FallState FallDetector_Update(
     float accel_g,
+    float *accel_mps2,
+    float *gyro_readings,
     float gyro_dps,
     uint16_t sound_value,
     uint32_t current_time
@@ -480,6 +484,8 @@ static FallState FallDetector_Update(
     static uint8_t impact_detected = 0;
     static uint8_t sound_detected = 0;
     static uint16_t quiet_samples = 0;
+    static float accel_baseline[3] = {0, 0, 0};
+    static float gyro_baseline[3] = {0, 0, 0};
 
     static float sound_baseline = 2048.0f;
 
@@ -498,16 +504,16 @@ static FallState FallDetector_Update(
 
     uint8_t loud_sound = (sound_difference > 300.0f);
 
-    if (gyro_dps > peak_gyro)
+    if (gyro_magnitude > peak_gyro)
     {
-        peak_gyro = gyro_dps;
+        peak_gyro = gyro_readings;
     }
 
     switch (state)
     {
     case FALL_NORMAL:
 
-        if (accel_g < FREEFALL_G ||
+        if (accel_g < FREEFALL_G || // TODO: change FREEFALL_G
             gyro_dps > ROTATION_DPS)
         {
             state = FALL_NEAR_FALL;
@@ -516,6 +522,9 @@ static FallState FallDetector_Update(
             impact_detected = 0;
             sound_detected = loud_sound;
             quiet_samples = 0;
+        } else {
+            accel_baseline = accel_mps2;
+            gyro_baseline = gyro_dps;
         }
 
         break;
