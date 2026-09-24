@@ -32,7 +32,7 @@ extern int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 
 UART_HandleTypeDef huart1;
 
-/*============================== Our Addition =================================*/
+/*=============================== Our Addition ===============================*/
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
 
@@ -56,6 +56,8 @@ static void Matrix_ShowSadFace(void);
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_value);
+void HAL_SYSTICK_Callback(void);
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 
 ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
@@ -68,7 +70,7 @@ static volatile uint8_t led_fall_mode = 0;
 static volatile uint8_t led_timer_enabled = 0;
 static volatile uint8_t reset_requested = 0;
 static volatile uint8_t detector_reset_requested = 0;
-/*============================== Our Addition =================================*/
+/*=============================== Our Addition ===============================*/
 
 int main(void)
 {
@@ -80,11 +82,12 @@ int main(void)
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
 
-    /*============================== Our Addition =================================*/
+    /*============================= Our Addition =============================*/
+    /*=============== LED AND RESET BUTTON INITIALISATION ====================*/
     led_timer_enabled = 1;
     BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
-	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION =======*/
+	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION ======*/
     External_Peripherals_Init();
     I2C_TestDevices();
 
@@ -107,14 +110,17 @@ int main(void)
     {
         UART_Send("HT16K33 init failed\r\n");
     }
+    /*============================= Our Addition =============================*/
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
     int  gyro_ewma_asm[3] = {0, 0, 0};
 
     /* Reference C states are kept separately for assembly verification. */
+    /*
     int accel_ewma_c[3] = {0, 0, 0};
     int  gyro_ewma_c[3] = {0, 0, 0};
+    */
 
     unsigned long sample_number = 0;
 
@@ -144,6 +150,7 @@ int main(void)
                 gyro_ewma_asm[axis],
                 EWMA_ALPHA_GYRO_PERCENT);
 
+            /*
             accel_ewma_c[axis] = ewma_filter_C(
                 (int)accel_raw_i16[axis],
                 accel_ewma_c[axis],
@@ -153,6 +160,7 @@ int main(void)
                 gyro_raw_int[axis],
                 gyro_ewma_c[axis],
                 EWMA_ALPHA_GYRO_PERCENT);
+             */
         }
 
         /* Accelerometer filtered readings are in meters per second squared. */
@@ -195,25 +203,24 @@ int main(void)
         }
         */
 
-        /**************** Elderly wearable state logic starts here************************
+        /**************** Elderly wearable state logic starts here**************
          * Compulsory requirements:
          * 1. Use filtered accelerometer AND gyroscope readings.
          * 2. Distinguish normal activity, near-fall movements, and a real fall.
          * 3. Use a slow LED blink for normal operation and a fast blink after
          *    a fall is detected.
-         *********************************************************************/
+         **********************************************************************/
 
         /* TODO: replace with your fall-detection logic */
 
-		/*===================== Input Readings ==============================*/
+        /*=========================== Our Addition ===========================*/
+
+		/*========================== Input Readings ==========================*/
 
         float accel_magnitude =
             sqrtf(accel_mps2[0] * accel_mps2[0] +
                   accel_mps2[1] * accel_mps2[1] +
                   accel_mps2[2] * accel_mps2[2]);
-
-        float accel_g = accel_magnitude / 9.80665f;
-        // float accel_g = (accel_magnitude - accel_baseline) / 9.80665f;
 
         float gyro_magnitude =
             sqrtf(gyro_dps[0] * gyro_dps[0] +
@@ -222,15 +229,9 @@ int main(void)
 
         uint16_t sound_value = SoundSensor_Read();
 
-        /*
-        char message[80];
-		snprintf(message, sizeof(message), "Sound ADC = %u\r\n", sound_value);
-		UART_Send(message);
-		*/
-
         uint32_t current_time = HAL_GetTick();
 
-		/*===================== Process Input Readings ==============================*/
+		/*===================== Process Input Readings =======================*/
         if (reset_requested)
         {
         	sample_number = 0;
@@ -253,9 +254,7 @@ int main(void)
         }
 
         FallState fall_state = FallDetector_Update(
-            accel_g,
-            //accel_mps2,
-            //gyro_dps,
+            accel_magnitude,
             gyro_magnitude,
             sound_value,
             current_time
@@ -265,24 +264,9 @@ int main(void)
         //led_fall_mode = (uint8_t) fall_detected;
         led_fall_mode = 1;
 
-        char message[256];
-        snprintf(message, sizeof(message),
-                 "Sample %lu\r\n"
-                 "Accel_G        = %.3f\r\n"
-                 "Gyro_Magnitude = %.3f\r\n"
-        		 "Sound ADC      = %u\r\n"
-        		 "Fall State     = %d\r\n"
-        		 "======================\r\n",
-                 sample_number,
-                 accel_g,
-                 gyro_magnitude,
-				 (unsigned int)sound_value,
-				 (int)fall_state);
-        UART_Send(message);
+		/*========================== Outputs =================================*/
 
-		/*========================== Outputs =============================*/
-
-        // Buzzer
+		/*========================== BUZZER ==================================*/
         if (fall_detected)
         {
             Buzzer_Set(1);
@@ -292,7 +276,7 @@ int main(void)
             Buzzer_Set(0);
         }
 
-        // LED Matrix
+		/*========================== LED MATRIX ==============================*/
         // Show a happy face during normal operation and a sad face after a fall.
         static int last_matrix_state = -1;
         if (led_matrix_ready && last_matrix_state != fall_detected)
@@ -308,23 +292,47 @@ int main(void)
 	        last_matrix_state = fall_detected;
         }
 
-        // OLED
+		/*========================== OLED MATRIX =============================*/
         static int last_oled_state = -1;
         if (oled_ready && last_oled_state != fall_detected) {
     		if (fall_detected)
     		{
     			OLED_SetFallMessage(&oled);
     		}
+    		else
+    		{
+    			OLED_SetInitMessage(&oled);
+    		}
     		last_oled_state = fall_detected;
         }
+
+        // Optional update to OLED to display live sound value
         OLED_SetSoundMessage(&oled, sound_value);
 
-		/*================ LED2 ===================*/
-        // BSP_LED_Toggle(LED2);
-        // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
-        HAL_Delay(NORMAL_LED_DELAY_MS);
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "Sample %lu\r\n"
+                 "Accel_Magnitude = %.3f\r\n"
+                 "Gyro_Magnitude  = %.3f\r\n"
+        		 "Sound ADC       = %u\r\n"
+        		 "Fall State      = %d\r\n"
+        		 "======================\r\n",
+                 sample_number,
+                 accel_magnitude,
+                 gyro_magnitude,
+				 (unsigned int)sound_value,
+				 (int)fall_state);
+        UART_Send(message);
 
         sample_number++;
+
+        HAL_Delay(20); // 20ms delay for 50 samples per second
+        /*=========================== Our Addition ===========================*/
+
+        /*
+        BSP_LED_Toggle(LED2);
+        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+        */
     }
 }
 
@@ -372,7 +380,7 @@ static void UART1_Init(void)
     }
 }
 
-
+/*=============================== Our Addition ===============================*/
 static void External_Peripherals_Init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -454,7 +462,6 @@ static void External_Peripherals_Init(void)
     HAL_ADC_ConfigChannel(&hadc1, &channel);
     HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 }
-
 static void I2C_TestDevices(void)
 {
     if (I2C_DevicePresent(OLED_ADDR))
@@ -475,7 +482,6 @@ static void I2C_TestDevices(void)
         UART_Send("LED matrix not detected\r\n");
     }
 }
-
 static uint8_t I2C_DevicePresent(uint16_t address)
 {
     return HAL_I2C_IsDeviceReady(
@@ -485,7 +491,6 @@ static uint8_t I2C_DevicePresent(uint16_t address)
         100
     ) == HAL_OK;
 }
-
 static uint16_t SoundSensor_Read(void)
 {
     uint16_t value = 0;
@@ -501,11 +506,8 @@ static uint16_t SoundSensor_Read(void)
 
     return value;       /* 0 to 4095 */
 }
-
 static FallState FallDetector_Update(
-    float accel_g,
-    //float accel_mps2[],
-    //float gyro_readings[],
+    float accel_mps2,
     float gyro_dps,
     uint16_t sound_value,
     uint32_t current_time
@@ -517,14 +519,11 @@ static FallState FallDetector_Update(
     static uint8_t impact_detected = 0;
     static uint8_t sound_detected = 0;
     static uint16_t quiet_samples = 0;
-    //static float accel_baseline[3] = {0, 0, 0};
-    //static float gyro_baseline[3] = {0, 0, 0};
-
     static float sound_baseline = 2048.0f;
 
-    const float FREEFALL_G = 0.55f;
-    const float IMPACT_G = 1.30f;
-    const float ROTATION_DPS = 180.0f;
+    const float FREEFALL_MPS2  = 0.55f;
+    const float IMPACT_MPS2    = 1.30f;
+    const float ROTATION_DPS   = 180.0f;
     const float QUIET_GYRO_DPS = 30.0f;
 
     const uint32_t NEAR_FALL_TIMEOUT_MS = 1000U;
@@ -538,7 +537,6 @@ static FallState FallDetector_Update(
         impact_detected = 0;
         sound_detected = 0;
         quiet_samples = 0;
-
         sound_baseline = 2048.0f;
 
         detector_reset_requested = 0;
@@ -560,8 +558,7 @@ static FallState FallDetector_Update(
     {
     case FALL_NORMAL:
 
-        if (accel_g < FREEFALL_G || // TODO: change FREEFALL_G
-            gyro_dps > ROTATION_DPS)
+        if (accel_mps2 < FREEFALL_MPS2 || gyro_dps > ROTATION_DPS)
         {
             state = FALL_NEAR_FALL;
             state_start_time = current_time;
@@ -569,11 +566,7 @@ static FallState FallDetector_Update(
             impact_detected = 0;
             sound_detected = loud_sound;
             quiet_samples = 0;
-        } else {
-            //accel_baseline = accel_mps2;
-            //gyro_baseline = gyro_dps;
         }
-
         break;
 
     case FALL_NEAR_FALL:
@@ -588,7 +581,7 @@ static FallState FallDetector_Update(
             sound_detected = 1;
         }
 
-        if (accel_g > IMPACT_G)
+        if (accel_mps2 > IMPACT_MPS2)
         {
             impact_detected = 1;
             state = FALL_CANDIDATE;
@@ -615,7 +608,7 @@ static FallState FallDetector_Update(
         }
 
         // Person is relatively still after the possible impact.
-        if (gyro_dps < QUIET_GYRO_DPS && accel_g > 0.75f && accel_g < 1.25f)
+        if (gyro_dps < QUIET_GYRO_DPS && accel_mps2 > 0.75f && accel_mps2 < 1.25f)
         {
             quiet_samples++;
         }
@@ -650,7 +643,6 @@ static FallState FallDetector_Update(
 
     return state;
 }
-
 static void Buzzer_Set(uint8_t enabled)
 {
     HAL_GPIO_WritePin(
@@ -659,7 +651,6 @@ static void Buzzer_Set(uint8_t enabled)
         enabled ? GPIO_PIN_SET : GPIO_PIN_RESET
     );
 }
-
 static void Matrix_ShowFace(const uint8_t face[8][8])
 {
     HT16K33_Clear(&led_matrix);
@@ -677,7 +668,6 @@ static void Matrix_ShowFace(const uint8_t face[8][8])
 
     HT16K33_Update(&led_matrix);
 }
-
 static void Matrix_ShowHappyFace(void)
 {
     static const uint8_t happy_face[8][8] =
@@ -694,7 +684,6 @@ static void Matrix_ShowHappyFace(void)
 
     Matrix_ShowFace(happy_face);
 }
-
 static void Matrix_ShowSadFace(void)
 {
     static const uint8_t sad_face[8][8] =
@@ -711,7 +700,6 @@ static void Matrix_ShowSadFace(void)
 
     Matrix_ShowFace(sad_face);
 }
-
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display)
 {
     SSD1306_Clear(display);
@@ -742,7 +730,6 @@ static void OLED_SetSoundMessage(SSD1306_HandleTypeDef *display, uint16_t sound_
 	SSD1306_WriteString(&oled, oled_text);
 	SSD1306_Update(&oled);
 }
-
 void HAL_SYSTICK_Callback(void)
 {
 	// NOTE: must add "HAL_SYSTICK_IRQHandler();" to
@@ -774,7 +761,6 @@ void HAL_SYSTICK_Callback(void)
         BSP_LED_Toggle(LED2);
     }
 }
-
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     static uint32_t last_press_time = 0;
@@ -790,6 +776,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         }
     }
 }
+/*=============================== Our Addition ===============================*/
 
 /* Do not modify these lines. They suppress UART-related warnings. */
 int _write(int file, char *ptr, int len)
