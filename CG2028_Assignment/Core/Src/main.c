@@ -552,7 +552,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
     const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
     const float IMPACT_THRESHOLD_MPS2   = 12.0f;
     const float ACCEL_BASELINE          = 10.0f;
-    const float FALLEN_ACCEL_RANGE      = 3.0f;
+    const float FALLEN_ACCEL_RANGE      = 1.5f;
     const float LONG_LIE_ACCEL_RANGE    = 3.0f;
     const float GYRO_DPS_THRESHOLD_MAX  = 200.0f; // DPS is degrees-per-second
     const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
@@ -560,7 +560,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     const uint32_t IMPACT_SOUND_TIMEOUT_MS = 5000U;   // 5 second timeout
     const uint32_t FREEFALL_TIMEOUT_MS     = 1000U;   // 1 second timeout
-    const uint32_t IMPACT_TIMEOUT_MS       = 5000U;   // 5 second timeout
+    const uint32_t IMPACT_TIMEOUT_MS       = 2000U;   // 2 second timeout
     const uint32_t LONG_LIE_TIMEOUT_MS     = 600000U; // 10 minute timeout
 //    const uint32_t LONG_LIE_TIMEOUT_MS     = 5000U;
     const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 100U;
@@ -580,7 +580,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
         fallen_movement_detected   = 0;
         long_lie_movement_detected = 0;
-        
+
         sound_baseline             = 2048.0f;
 
         detector_reset_requested = 0;
