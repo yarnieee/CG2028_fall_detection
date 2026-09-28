@@ -51,6 +51,7 @@ static void UpdateSoundStatus(uint16_t sound_value, uint32_t current_time);
 static void UpdateBuzzer(FallState fall_state, uint32_t current_time);
 static void HandleFallStateChange(FallState fall_state);
 static void LogStatus(FallState fall_state, float accel_magnitude, float gyro_magnitude, uint8_t loud_sound_detected, uint32_t current_time);
+static void ProcessResetRequest(void);
 
 static void External_Peripherals_Init(void);
 static void I2C_TestDevices(void);
@@ -150,8 +151,7 @@ int main(void) {
 
         if (!filter_initialized) {
         	/* Use the first real sensor readings as the initial filter state.*/
-			for (int axis = 0; axis < 3; axis++)
-			{
+			for (int axis = 0; axis < 3; axis++) {
 				accel_ewma_asm[axis] = (int)accel_raw_i16[axis];
 				gyro_ewma_asm[axis] = gyro_raw_int[axis];
 			}
@@ -211,25 +211,6 @@ int main(void) {
         uint32_t current_time = HAL_GetTick();
 
 		/*===================== Process Input Readings =======================*/
-        if (reset_requested) {
-            led_fall_mode = 0;
-            Buzzer_Set(0);
-            BSP_LED_Off(LED2);
-
-            if (led_matrix_ready) {
-                Matrix_ShowHappyFace();
-            }
-
-            if (oled_ready) {
-                OLED_SetInitMessage(&oled);
-            }
-
-            UART_Send("RESET\r\n");
-
-            reset_requested = 0;
-            detector_reset_requested = 1;
-        }
-
         /*===================== FALL DETECTOR MACHINE ========================*/
         /* Fall detector machine is called here, every cycle of main () */
         /* THIS FUNCTION IS VERY IMPORTANT */
@@ -249,6 +230,10 @@ int main(void) {
 
         /*================= UART LOGGING =====================================*/
         LogStatus(fall_state, accel_magnitude, gyro_magnitude, loud_sound_detected, current_time);
+
+        if (reset_requested) {
+        	ProcessResetRequest();
+        }
 
         /* Nominal 20 ms delay; actual loop period is slightly longer. At most 50 samples per second */
         HAL_Delay(20);
@@ -310,18 +295,14 @@ static FallState FallDetector_Update(
 
     if (detector_reset_requested) {
         state = NORMAL_0;
-
         state_start_time           = 0;
         last_motion_time           = 0;
-
         inactivity_samples         = 0;
-
         impact_accel_detected      = 0;
         impact_gyro_detected       = 0;
         fallen_movement_detected   = 0;
         long_lie_movement_detected = 0;
-
-        detector_reset_requested = 0;
+        detector_reset_requested   = 0;
     }
 
     switch (state) {
@@ -505,6 +486,24 @@ static void LogStatus(
 		UART_Send(log_message);
 		last_log_time = current_time;
     }
+}
+static void ProcessResetRequest(void) {
+	led_fall_mode = 0;
+	Buzzer_Set(0);
+	BSP_LED_Off(LED2);
+
+	if (led_matrix_ready) {
+		Matrix_ShowHappyFace();
+	}
+
+	if (oled_ready) {
+		OLED_SetInitMessage(&oled);
+	}
+
+	UART_Send("RESET\r\n");
+
+	reset_requested = 0;
+	detector_reset_requested = 1;
 }
 
 static void External_Peripherals_Init(void) {

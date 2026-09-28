@@ -44,7 +44,7 @@
 ewma_filter:
     PUSH {r4-r7, lr}
 
-    @ Implement the EWMA low-pass filter in pure ARM assembly.
+    @ Implementation of EWMA low-pass filter in pure ARM assembly.
     @ output = [alpha_percent x new_data + (100 - alpha_percent) x old_output] / 100
 	@ R0 - new_data   (signed 32-bit integer)
 	@ R1 - old_output (signed 32-bit integer)
