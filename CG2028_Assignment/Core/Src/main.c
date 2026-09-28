@@ -34,6 +34,8 @@ extern int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 UART_HandleTypeDef huart1;
 
 /*=============================== Our Addition v ===============================*/
+#define DEMO_MODE 1
+
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
 
@@ -73,7 +75,7 @@ static volatile uint8_t reset_requested = 0;
 static volatile uint8_t detector_reset_requested = 0;
 /*=============================== Our Addition ^ ===============================*/
 
-int main(void) { // THIS ONEEEEEEEEEEE =======================================
+int main(void) {
     HAL_Init();
     UART1_Init();
 
@@ -110,13 +112,12 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
     int accel_ewma_asm[3] = {0, 0, 0};
     int  gyro_ewma_asm[3] = {0, 0, 0};
 
-    /* Reference C states are kept separately for assembly verification. */
-    /*
-    int accel_ewma_c[3] = {0, 0, 0};
-    int  gyro_ewma_c[3] = {0, 0, 0};
-    */
+    /* Boolean check for filter initialization */
+    uint8_t filter_initialized = 0;
 
-    // unsigned long sample_number = 0;
+    /* Reference C states are kept separately for assembly verification. */
+	//  int accel_ewma_c[3] = {0, 0, 0};
+	//	int  gyro_ewma_c[3] = {0, 0, 0};
 
     // while loop runs once every 20ms
     while (1) {
@@ -132,29 +133,44 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
          * integer assembly routine. */
         for (int axis = 0; axis < 3; axis++) {
             gyro_raw_int[axis] = (int)gyro_raw_float[axis];
-
-            accel_ewma_asm[axis] = ewma_filter(
-                (int)accel_raw_i16[axis],
-                accel_ewma_asm[axis],
-                EWMA_ALPHA_ACCEL_PERCENT);
-
-            gyro_ewma_asm[axis] = ewma_filter(
-                gyro_raw_int[axis],
-                gyro_ewma_asm[axis],
-                EWMA_ALPHA_GYRO_PERCENT);
-
-            /*
-            accel_ewma_c[axis] = ewma_filter_C(
-                (int)accel_raw_i16[axis],
-                accel_ewma_c[axis],
-                EWMA_ALPHA_ACCEL_PERCENT);
-
-            gyro_ewma_c[axis] = ewma_filter_C(
-                gyro_raw_int[axis],
-                gyro_ewma_c[axis],
-                EWMA_ALPHA_GYRO_PERCENT);
-             */
         }
+
+        /*============================= Our Addition v =============================*/
+        if (!filter_initialized) {
+
+        	/* Use the first real sensor readings as the initial filter state.*/
+			for (int axis = 0; axis < 3; axis++)
+			{
+				accel_ewma_asm[axis] = (int)accel_raw_i16[axis];
+				gyro_ewma_asm[axis] = gyro_raw_int[axis];
+			}
+
+			filter_initialized = 1;
+        } else {
+        	/* Apply EWMA from the second sample onward.*/
+			for (int axis = 0; axis < 3; axis++) {
+				accel_ewma_asm[axis] = ewma_filter(
+					(int)accel_raw_i16[axis],
+					accel_ewma_asm[axis],
+					EWMA_ALPHA_ACCEL_PERCENT);
+
+				gyro_ewma_asm[axis] = ewma_filter(
+					gyro_raw_int[axis],
+					gyro_ewma_asm[axis],
+					EWMA_ALPHA_GYRO_PERCENT);
+			}
+        }
+        /*============================= Our Addition ^ =============================*/
+
+		//	accel_ewma_c[axis] = ewma_filter_C(
+		//		(int)accel_raw_i16[axis],
+		//		accel_ewma_c[axis],
+		//		EWMA_ALPHA_ACCEL_PERCENT);
+		//
+		//	gyro_ewma_c[axis] = ewma_filter_C(
+		//		gyro_raw_int[axis],
+		//		gyro_ewma_c[axis],
+		//		EWMA_ALPHA_GYRO_PERCENT);
 
         /* Accelerometer filtered readings are in meters per second squared. */
         float accel_mps2[3] = {
@@ -170,31 +186,28 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
             gyro_ewma_asm[2] / 1000.0f
         };
 
-        /*
-        char buffer[320];
-        snprintf(buffer, sizeof(buffer),
-                 "Sample %lu\r\n"
-                 "Accel EWMA ASM [m/s^2]: X=%8.3f Y=%8.3f Z=%8.3f\r\n"
-                 "Gyro  EWMA ASM [dps]  : X=%8.3f Y=%8.3f Z=%8.3f\r\n",
-                 sample_number,
-                 accel_mps2[0], accel_mps2[1], accel_mps2[2],
-                 gyro_dps[0], gyro_dps[1], gyro_dps[2]);
-        UART_Send(buffer);
-        */
+		//	char buffer[320];
+		//	snprintf(buffer, sizeof(buffer),
+		//			 //"Sample %lu\r\n"
+		//			 "Accel EWMA ASM [m/s^2]: X=%8.3f Y=%8.3f Z=%8.3f\r\n"
+		//			 "Gyro  EWMA ASM [dps]  : X=%8.3f Y=%8.3f Z=%8.3f\r\n",
+		//			 //sample_number,
+		//			 accel_mps2[0], accel_mps2[1], accel_mps2[2],
+		//			 gyro_dps[0], gyro_dps[1], gyro_dps[2]);
+		//	UART_Send(buffer);
+
 
         /* Optional debugging check. This confirms that the assembly routine
          * matches the reference C routine for the current samples. */
-        /*
-        if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
-            (accel_ewma_asm[1] != accel_ewma_c[1]) ||
-            (accel_ewma_asm[2] != accel_ewma_c[2]) ||
-            (gyro_ewma_asm[0] != gyro_ewma_c[0]) ||
-            (gyro_ewma_asm[1] != gyro_ewma_c[1]) ||
-            (gyro_ewma_asm[2] != gyro_ewma_c[2]))
-        {
-            UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
-        }
-        */
+		//	if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
+		//		(accel_ewma_asm[1] != accel_ewma_c[1]) ||
+		//		(accel_ewma_asm[2] != accel_ewma_c[2]) ||
+		//		(gyro_ewma_asm[0] != gyro_ewma_c[0]) ||
+		//		(gyro_ewma_asm[1] != gyro_ewma_c[1]) ||
+		//		(gyro_ewma_asm[2] != gyro_ewma_c[2]))
+		//	{
+		//		UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
+		//	}
 
         /**************** Elderly wearable state logic starts here**************
          * Compulsory requirements:
@@ -204,12 +217,9 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
          *    a fall is detected.
          **********************************************************************/
 
-        /* TODO: replace with your fall-detection logic */
-
         /*=========================== Our Addition v ===========================*/
-        // IMPT SECTION ========================================================
-
-		/*========================== Input Readings ==========================*/
+        /*========================== IMPT SECTION ============================= */
+		/*========================== Input Readings ============================*/
 
         float accel_magnitude =
             sqrtf(accel_mps2[0] * accel_mps2[0] +
@@ -239,31 +249,27 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
                 OLED_SetInitMessage(&oled);
             }
 
+            UART_Send("RESET\r\n");
+
             reset_requested = 0;
             detector_reset_requested = 1;
         }
 
-        // Fall detector is called here, every cycle of main ()
-        FallState fall_state = FallDetector_Update(
-            accel_magnitude,
-            gyro_magnitude,
-            current_time
-        );
+        /* Fall detector is called here, every cycle of main () */
+        FallState fall_state = FallDetector_Update(accel_magnitude, gyro_magnitude, current_time);
 
         int fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
         led_fall_mode = (uint8_t) fall_detected;
 
 		/*========================== SOUND ===================================*/
-        // Compare against current time to get duration of current state.
-        static uint32_t last_impact_sound_time = 0;
-
-        // Sound variable
+        // Sound value at normal conditions
         static float sound_baseline = 1000.0f;
-
         // Lound sound samples describes the number of records detected as "loud"
         static uint16_t loud_sound_samples = 0;
-
+        // Status flag to indicate when a potential impact sound is detected
         static uint8_t impact_sound_detected = 0;
+        // Compare against current time to get duration of current state.
+        static uint32_t last_impact_sound_time = 0;
 
         // Sound constants
         const float MAX_SOUND_DIFF = 2000.0f;
@@ -293,12 +299,17 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
 		/*========================== Outputs =================================*/
 
 		/*========================== BUZZER ==================================*/
-        static int buzzer_state = 0;
-        if (fall_detected) {
+        static uint8_t buzzer_state = 0;
+        static uint32_t last_buzzer_toggle = 0;
+        uint32_t buzzer_period = (fall_state == LONG_LIE_4) ? 250U : 500U;
+
+        if (!fall_detected) {
+        	buzzer_state = 0;
+        	Buzzer_Set(0);
+        } else if (current_time - last_buzzer_toggle >= buzzer_period){
+            buzzer_state = !buzzer_state;
             Buzzer_Set(buzzer_state);
-            buzzer_state = ~buzzer_state;
-        } else {
-            Buzzer_Set(0);
+            last_buzzer_toggle = current_time;
         }
 
 		/*=============== UART, LED MATRIX AND OLED ==========================*/
@@ -307,22 +318,16 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
         if (fall_state != previous_state) {
         	switch (fall_state) {
         	case NORMAL_0:
-                UART_Send("NORMAL\r\n");
-                if (led_matrix_ready) {
-	        		Matrix_ShowHappyFace();
-				}
-                if (oled_ready) {
-                	OLED_SetInitMessage(&oled);
-                }
+                UART_Send("\n\nNORMAL\r\n");
                 break;
         	case FREEFALL_1:
-        		UART_Send("FREEFALL\r\n");
+        		UART_Send("\n\nFREEFALL\r\n");
         		break;
         	case IMPACT_2:
-        		UART_Send("IMPACT\r\n");
+        		UART_Send("\n\nIMPACT\r\n");
         		break;
         	case FALLEN_3:
-                UART_Send("FALL CONFIRMED\r\n");
+                UART_Send("\n\nFALL CONFIRMED\r\n");
                 if (led_matrix_ready) {
 	        		Matrix_ShowSadFace();
 				}
@@ -331,95 +336,87 @@ int main(void) { // THIS ONEEEEEEEEEEE =======================================
                 }
                 break;
         	case LONG_LIE_4:
-				UART_Send("LONG LIE ESCALATION: NO MOVEMENT\r\n");
+				UART_Send("\n\nLONG LIE ESCALATION: NO MOVEMENT\r\n");
 				if (oled_ready) {
 					OLED_SetLongLieMessage(&oled);
 				}
         	}
 
-        	char message[160];
-			snprintf(message, sizeof(message),
-					 "[Time: %5u] | Accel: %6.2f | Gyro: %6.2f | Loud Sound? %u\r\n",
-					 (unsigned int) current_time,
-					 accel_magnitude,
-					 gyro_magnitude,
-					 impact_sound_detected);
-			UART_Send(message);
-
             previous_state = fall_state;
         }
 
-        /*
-        char message[256];
-        snprintf(message, sizeof(message),
-                 "Sample %lu\r\n"
-                 "Accel_Magnitude = %.3f\r\n"
-                 "Gyro_Magnitude  = %.3f\r\n"
-        		 "Sound ADC       = %u\r\n"
-        		 "Fall State      = %d\r\n"
-        		 "======================\r\n",
-                 sample_number,
-                 accel_magnitude,
-                 gyro_magnitude,
-				 (unsigned int)sound_value,
-				 (int)fall_state);
-        UART_Send(message);
+		//	char message[256];
+		//	snprintf(message, sizeof(message),
+		//			 "Sample %lu\r\n"
+		//			 "Accel_Magnitude = %.3f\r\n"
+		//			 "Gyro_Magnitude  = %.3f\r\n"
+		//			 "Sound ADC       = %u\r\n"
+		//			 "Fall State      = %d\r\n"
+		//			 "======================\r\n",
+		//			 sample_number,
+		//			 accel_magnitude,
+		//			 gyro_magnitude,
+		//			 (unsigned int)sound_value,
+		//			 (int)fall_state);
+		//	UART_Send(message);
+		//	sample_number++;
+		//
+		//	char message[32];
+		//	snprintf(message, sizeof(message), "State = %d %.3f\r\n", (int)fall_state, accel_magnitude);
+		//	UART_Send(message);
+		//
+		//	static uint32_t last_uart_time = 0;
+		//	if ((current_time - last_uart_time) >= 0) {
+		//		char message[160];
+		//
+		//		snprintf(message, sizeof(message),
+		//				 "%d, %d, %6.2f, %6.2f, %5u\r\n",
+		//				 (int)current_time,
+		//				 (int)fall_state,
+		//				 accel_magnitude,
+		//				 gyro_magnitude,
+		//				 (unsigned int)sound_value);
+		//
+		//		UART_Send(message);
+		//		last_uart_time = current_time;
+		//	}
 
-        sample_number++;
-        */
+        static uint32_t last_log_time = 0;
 
-        /*
-        char message[32];
-		snprintf(message, sizeof(message), "State = %d %.3f\r\n", (int)fall_state, accel_magnitude);
-		UART_Send(message);
-		*/
-
-        /*
-        static uint32_t last_uart_time = 0;
-
-        if ((current_time - last_uart_time) >= 0)
-        {
-            char message[160];
-
-            snprintf(message, sizeof(message),
-            		 "%d, %d, %6.2f, %6.2f, %5u\r\n",
-					 (int)current_time,
-					 (int)fall_state,
+        if ((current_time - last_log_time) >= 250U) {
+			char log_message[160];
+			snprintf(log_message, sizeof(log_message),
+					 "Time: %6u | State: %d | Accel: %6.2f | Gyro: %6.2f | Impact Sound: %u\r\n",
+					 (unsigned int) current_time,
+					 (int) fall_state,
 					 accel_magnitude,
-                     gyro_magnitude,
-                     (unsigned int)sound_value);
-
-            UART_Send(message);
-            last_uart_time = current_time;
+					 gyro_magnitude,
+					 impact_sound_detected);
+			UART_Send(log_message);
+			last_log_time = current_time;
         }
-        */
 
-        HAL_Delay(20); // 20ms delay for 50 samples per second
+		/* 20ms delay for 50 samples per second */
+        HAL_Delay(20);
         /*=========================== Our Addition ^ ===========================*/
 
-        /*
-        BSP_LED_Toggle(LED2);
-        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
-        */
+		//	BSP_LED_Toggle(LED2);
+		//	HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
     }
 }
 
-int ewma_filter_C(int new_data, int old_output, int alpha_percent)
-{
+int ewma_filter_C(int new_data, int old_output, int alpha_percent) {
     /* Reference implementation for verification only. The assembly routine
      * must be used in the actual sensor-processing and detection pipeline. */
-    int numerator = alpha_percent * new_data
-                  + (100 - alpha_percent) * old_output;
+    int numerator = alpha_percent * new_data + (100 - alpha_percent) * old_output;
     return numerator / 100;
 }
 
-static void UART_Send(const char *text)
-{
+static void UART_Send(const char *text) {
     HAL_UART_Transmit(&huart1, (uint8_t *)text, strlen(text), HAL_MAX_DELAY);
 }
 
-static void UART1_Init(void)
-{
+static void UART1_Init(void) {
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_USART1_CLK_ENABLE();
 
@@ -442,9 +439,8 @@ static void UART1_Init(void)
     huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
     huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
 
-    if (HAL_UART_Init(&huart1) != HAL_OK)
-    {
-        while (1) { }
+    if (HAL_UART_Init(&huart1) != HAL_OK) {
+        while (1) {}
     }
 }
 
@@ -526,8 +522,22 @@ static void External_Peripherals_Init(void) {
     channel.OffsetNumber = ADC_OFFSET_NONE;
     channel.Offset = 0;
 
-    HAL_ADC_ConfigChannel(&hadc1, &channel);
-    HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+    // If configuration or calibration failed, then UART error message is shown with blinking LED
+    if (HAL_ADC_ConfigChannel(&hadc1, &channel) != HAL_OK) {
+        UART_Send("ADC channel configuration failed\r\n");
+        while (1) {
+            BSP_LED_Toggle(LED2);
+            HAL_Delay(200);
+        }
+    }
+
+    if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK) {
+        UART_Send("ADC calibration failed\r\n");
+        while (1) {
+            BSP_LED_Toggle(LED2);
+            HAL_Delay(200);
+        }
+    }
 }
 static void I2C_TestDevices(void) {
     if (I2C_DevicePresent(OLED_ADDR))
@@ -561,8 +571,7 @@ static uint16_t SoundSensor_Read(void) {
 
     HAL_ADC_Start(&hadc1);
 
-    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
-    {
+    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
         value = (uint16_t)HAL_ADC_GetValue(&hadc1);
     }
 
@@ -571,12 +580,9 @@ static uint16_t SoundSensor_Read(void) {
     return value;       /* 0 to 4095 */
 }
 
-/**
- * FallDetector_Update is called by main once every 20ms (depending on HAL_Delay at the end)
- *
- * returns FallState
- */
-static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
+/* FallDetector_Update is called by main once every 20ms (depending on HAL_Delay at the end) */
+/* THIS FUNCTION IS VERY IMPORTANT */
+static FallState FallDetector_Update(
     float accel_mps2,
     float gyro_dps,
     uint32_t current_time
@@ -593,6 +599,8 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
     static uint16_t inactivity_samples = 0;
 
     // Boolean checks
+    static uint8_t impact_accel_detected = 0;
+    static uint8_t impact_gyro_detected = 0;
     static uint8_t fallen_movement_detected = 0;
     static uint8_t long_lie_movement_detected = 0;
 
@@ -606,10 +614,9 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
     const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
 
     const uint32_t FREEFALL_TIMEOUT_MS     = 1000U;   // 1 second timeout
-    const uint32_t IMPACT_TIMEOUT_MS       = 2000U;   // 2 second timeout
-    //const uint32_t LONG_LIE_TIMEOUT_MS     = 600000U; // 10 minute timeout
-    const uint32_t LONG_LIE_TIMEOUT_MS     = 5000U; // for testing and demo
-    const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 35U;
+    const uint32_t IMPACT_TIMEOUT_MS       = 2500U;   // 2.5 second timeout
+    const uint32_t LONG_LIE_TIMEOUT_MS     = (DEMO_MODE) ? 5000U : 600000U; // for demo, 5000; for irl, 10 minute
+    const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 45U;
 
     if (detector_reset_requested) {
         state = NORMAL_0;
@@ -619,24 +626,13 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
         inactivity_samples         = 0;
 
+        impact_accel_detected      = 0;
+        impact_gyro_detected       = 0;
         fallen_movement_detected   = 0;
         long_lie_movement_detected = 0;
 
         detector_reset_requested = 0;
-        UART_Send("RESET\r\n\n\n\n\n");
     }
-
-    // Whether elderly is moving is based on the
-    // rotational speed and acceleration at rest
-    fallen_movement_detected =
-    	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
-		(accel_mps2 < ACCEL_BASELINE - FALLEN_ACCEL_RANGE) ||
-		(accel_mps2 > ACCEL_BASELINE + FALLEN_ACCEL_RANGE);
-
-    long_lie_movement_detected =
-    	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
-		(accel_mps2 < ACCEL_BASELINE - LONG_LIE_ACCEL_RANGE) ||
-		(accel_mps2 > ACCEL_BASELINE + LONG_LIE_ACCEL_RANGE);
 
     switch (state) {
     case NORMAL_0: //possible: if within certain ms of each other it crosses the threshold
@@ -648,16 +644,31 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
         break;
 
     case FREEFALL_1:
-        if (accel_mps2 > IMPACT_THRESHOLD_MPS2 && gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
+    	if (accel_mps2 > IMPACT_THRESHOLD_MPS2) {
+    		impact_accel_detected = 1;
+    	}
+
+		if (gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
+			impact_gyro_detected = 1;
+		}
+
+        if (impact_accel_detected && impact_gyro_detected) {
             state = IMPACT_2;
             state_start_time = current_time;
         } else if ((current_time - state_start_time) > FREEFALL_TIMEOUT_MS) {
+        	state = NORMAL_0;
             detector_reset_requested = 1;
         }
 
         break;
 
     case IMPACT_2:
+        // Whether elderly is moving is based on the rotational speed and acceleration at rest
+        fallen_movement_detected =
+        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+    		(accel_mps2 < ACCEL_BASELINE - FALLEN_ACCEL_RANGE) ||
+    		(accel_mps2 > ACCEL_BASELINE + FALLEN_ACCEL_RANGE);
+
         // Person is relatively still after the possible impact.
         if (!fallen_movement_detected) {
             inactivity_samples++;
@@ -672,6 +683,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
                 state_start_time = current_time;
                 last_motion_time = current_time;
             } else {
+            	state = NORMAL_0;
                 detector_reset_requested = 1;
             }
         }
@@ -679,6 +691,12 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
         break;
 
     case FALLEN_3:
+        // Whether elderly is moving is based on the rotational speed and acceleration at rest
+        long_lie_movement_detected =
+        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+    		(accel_mps2 < ACCEL_BASELINE - LONG_LIE_ACCEL_RANGE) ||
+    		(accel_mps2 > ACCEL_BASELINE + LONG_LIE_ACCEL_RANGE);
+
         if (long_lie_movement_detected) {
             // The person moved, so restart the long-lie timer.
             last_motion_time = current_time;
@@ -758,7 +776,7 @@ static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display) {
 static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display) {
 	SSD1306_Clear(display);
 	SSD1306_SetCursor(display, 0, 0);
-	SSD1306_WriteString(display, "IVE FALLEN  CALL 995");
+	SSD1306_WriteString(display, "IVE FALLEN  HELP ME");
 	SSD1306_SetCursor(display, 0, 16);
 	SSD1306_WriteString(display, "FAMILY NUM: 8655 4322");
 	SSD1306_SetCursor(display, 8, 32);
