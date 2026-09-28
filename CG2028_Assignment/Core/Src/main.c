@@ -29,11 +29,10 @@ static void UART1_Init(void);
 static void UART_Send(const char *text);
 
 extern int ewma_filter(int new_data, int old_output, int alpha_percent);
-extern int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 
 UART_HandleTypeDef huart1;
 
-/*=============================== Our Addition v ===============================*/
+/*============================ Additional Configurations ===============================*/
 #define DEMO_MODE 1
 
 #define OLED_ADDR    (0x3C << 1)
@@ -47,11 +46,16 @@ typedef enum FallState {
 	LONG_LIE_4
 } FallState;
 
+static FallState FallDetector_Update(float accel_mps2, float gyro_dps, uint32_t current_time);
+static void UpdateSoundStatus(uint16_t sound_value, uint32_t current_time);
+static void UpdateBuzzer(FallState fall_state, uint32_t current_time);
+static void HandleFallStateChange(FallState fall_state);
+static void LogStatus(FallState fall_state, float accel_magnitude, float gyro_magnitude, uint8_t loud_sound_detected, uint32_t current_time);
+
 static void External_Peripherals_Init(void);
 static void I2C_TestDevices(void);
 static uint8_t I2C_DevicePresent(uint16_t address);
 static uint16_t SoundSensor_Read(void);
-static FallState FallDetector_Update(float accel_g, float gyro_dps, uint32_t current_time);
 static void Buzzer_Set(uint8_t enabled);
 static void Matrix_ShowFace(const uint8_t face[8][8]);
 static void Matrix_ShowHappyFace(void);
@@ -69,11 +73,26 @@ static HT16K33_HandleTypeDef led_matrix;
 static uint8_t oled_ready = 0;
 static uint8_t led_matrix_ready = 0;
 
-static volatile uint8_t led_fall_mode = 0;
-static volatile uint8_t led_timer_enabled = 0;
-static volatile uint8_t reset_requested = 0;
+static volatile uint8_t reset_requested          = 0;
 static volatile uint8_t detector_reset_requested = 0;
-/*=============================== Our Addition ^ ===============================*/
+static volatile uint8_t fall_detected            = 0;
+static volatile uint8_t loud_sound_detected      = 0; // Status flag to indicate when a potential impact sound is detected
+static volatile uint8_t led_fall_mode            = 0;
+static volatile uint8_t led_timer_enabled        = 0;
+
+// Threshold constants for FallDetector_Update(), used to compare against active values
+const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
+const float IMPACT_THRESHOLD_MPS2   = 16.0f;
+const float ACCEL_BASELINE          = 10.0f;
+const float FALLEN_ACCEL_RANGE      = 4.0f;
+const float LONG_LIE_ACCEL_RANGE    = 5.0f;
+const float GYRO_DPS_THRESHOLD_MAX  = 90.0f; // DPS is degrees-per-second
+const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
+
+const uint32_t FREEFALL_TIMEOUT_MS = 1000U;   // 1 second timeout
+const uint32_t IMPACT_TIMEOUT_MS   = 2500U;   // 2.5 second timeout
+const uint32_t LONG_LIE_TIMEOUT_MS = (DEMO_MODE) ? 5000U : 600000U; // Demo timeout: 5 seconds; Deployment timeout: 10 minutes
+const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 45U;
 
 int main(void) {
     HAL_Init();
@@ -84,7 +103,6 @@ int main(void) {
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
 
-    /*============================= Our Addition v =============================*/
     /*=============== LED AND RESET BUTTON INITIALISATION ====================*/
     led_timer_enabled = 1;
     BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
@@ -106,7 +124,6 @@ int main(void) {
     } else {
         UART_Send("HT16K33 init failed\r\n");
     }
-    /*============================= Our Addition ^ =============================*/
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
@@ -114,10 +131,6 @@ int main(void) {
 
     /* Boolean check for filter initialization */
     uint8_t filter_initialized = 0;
-
-    /* Reference C states are kept separately for assembly verification. */
-	//  int accel_ewma_c[3] = {0, 0, 0};
-	//	int  gyro_ewma_c[3] = {0, 0, 0};
 
     // while loop runs once every 20ms
     while (1) {
@@ -135,9 +148,7 @@ int main(void) {
             gyro_raw_int[axis] = (int)gyro_raw_float[axis];
         }
 
-        /*============================= Our Addition v =============================*/
         if (!filter_initialized) {
-
         	/* Use the first real sensor readings as the initial filter state.*/
 			for (int axis = 0; axis < 3; axis++)
 			{
@@ -160,17 +171,6 @@ int main(void) {
 					EWMA_ALPHA_GYRO_PERCENT);
 			}
         }
-        /*============================= Our Addition ^ =============================*/
-
-		//	accel_ewma_c[axis] = ewma_filter_C(
-		//		(int)accel_raw_i16[axis],
-		//		accel_ewma_c[axis],
-		//		EWMA_ALPHA_ACCEL_PERCENT);
-		//
-		//	gyro_ewma_c[axis] = ewma_filter_C(
-		//		gyro_raw_int[axis],
-		//		gyro_ewma_c[axis],
-		//		EWMA_ALPHA_GYRO_PERCENT);
 
         /* Accelerometer filtered readings are in meters per second squared. */
         float accel_mps2[3] = {
@@ -186,29 +186,6 @@ int main(void) {
             gyro_ewma_asm[2] / 1000.0f
         };
 
-		//	char buffer[320];
-		//	snprintf(buffer, sizeof(buffer),
-		//			 //"Sample %lu\r\n"
-		//			 "Accel EWMA ASM [m/s^2]: X=%8.3f Y=%8.3f Z=%8.3f\r\n"
-		//			 "Gyro  EWMA ASM [dps]  : X=%8.3f Y=%8.3f Z=%8.3f\r\n",
-		//			 //sample_number,
-		//			 accel_mps2[0], accel_mps2[1], accel_mps2[2],
-		//			 gyro_dps[0], gyro_dps[1], gyro_dps[2]);
-		//	UART_Send(buffer);
-
-
-        /* Optional debugging check. This confirms that the assembly routine
-         * matches the reference C routine for the current samples. */
-		//	if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
-		//		(accel_ewma_asm[1] != accel_ewma_c[1]) ||
-		//		(accel_ewma_asm[2] != accel_ewma_c[2]) ||
-		//		(gyro_ewma_asm[0] != gyro_ewma_c[0]) ||
-		//		(gyro_ewma_asm[1] != gyro_ewma_c[1]) ||
-		//		(gyro_ewma_asm[2] != gyro_ewma_c[2]))
-		//	{
-		//		UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
-		//	}
-
         /**************** Elderly wearable state logic starts here**************
          * Compulsory requirements:
          * 1. Use filtered accelerometer AND gyroscope readings.
@@ -217,8 +194,6 @@ int main(void) {
          *    a fall is detected.
          **********************************************************************/
 
-        /*=========================== Our Addition v ===========================*/
-        /*========================== IMPT SECTION ============================= */
 		/*========================== Input Readings ============================*/
 
         float accel_magnitude =
@@ -255,165 +230,29 @@ int main(void) {
             detector_reset_requested = 1;
         }
 
-        /* Fall detector is called here, every cycle of main () */
+        /*===================== FALL DETECTOR MACHINE ========================*/
+        /* Fall detector machine is called here, every cycle of main () */
+        /* THIS FUNCTION IS VERY IMPORTANT */
         FallState fall_state = FallDetector_Update(accel_magnitude, gyro_magnitude, current_time);
+        fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
+        led_fall_mode = fall_detected;
 
-        int fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
-        led_fall_mode = (uint8_t) fall_detected;
-
-		/*========================== SOUND ===================================*/
-        // Sound value at normal conditions
-        static float sound_baseline = 1000.0f;
-        // Lound sound samples describes the number of records detected as "loud"
-        static uint16_t loud_sound_samples = 0;
-        // Status flag to indicate when a potential impact sound is detected
-        static uint8_t impact_sound_detected = 0;
-        // Compare against current time to get duration of current state.
-        static uint32_t last_impact_sound_time = 0;
-
-        // Sound constants
-        const float MAX_SOUND_DIFF = 2000.0f;
-        const uint16_t MIN_NUM_OF_LOUD_SOUND_SAMPLES = 5U;
-        const uint32_t IMPACT_SOUND_TIMEOUT_MS = 5000U;   // 5 second timeout
-
-        // Estimate the normal sound level.
-        sound_baseline = (0.99f * sound_baseline) + (0.01f * (float)sound_value);
-
-        float sound_difference = fabsf((float)sound_value - sound_baseline);
-
-        if (sound_difference > MAX_SOUND_DIFF) {
-        	loud_sound_samples++;
-        } else {
-        	loud_sound_samples = 0;
-        }
-
-        if (loud_sound_samples >= MIN_NUM_OF_LOUD_SOUND_SAMPLES) {
-        	impact_sound_detected = 1;
-        	last_impact_sound_time = current_time;
-        }
-
-        if ((current_time - last_impact_sound_time) > IMPACT_SOUND_TIMEOUT_MS) {
-        	impact_sound_detected = 0;
-        }
+		/*===================== SOUND SENSOR =================================*/
+        UpdateSoundStatus(sound_value, current_time);
 
 		/*========================== Outputs =================================*/
-
 		/*========================== BUZZER ==================================*/
-        static uint8_t buzzer_state = 0;
-        static uint32_t last_buzzer_toggle = 0;
-        uint32_t buzzer_period = (fall_state == LONG_LIE_4) ? 250U : 500U;
-
-        if (!fall_detected) {
-        	buzzer_state = 0;
-        	Buzzer_Set(0);
-        } else if (current_time - last_buzzer_toggle >= buzzer_period){
-            buzzer_state = !buzzer_state;
-            Buzzer_Set(buzzer_state);
-            last_buzzer_toggle = current_time;
-        }
+        UpdateBuzzer(fall_state, current_time);
 
 		/*=============== UART, LED MATRIX AND OLED ==========================*/
-        static FallState previous_state = NORMAL_0;
+        HandleFallStateChange(fall_state);
 
-        if (fall_state != previous_state) {
-        	switch (fall_state) {
-        	case NORMAL_0:
-                UART_Send("\n\nNORMAL\r\n");
-                break;
-        	case FREEFALL_1:
-        		UART_Send("\n\nFREEFALL\r\n");
-        		break;
-        	case IMPACT_2:
-        		UART_Send("\n\nIMPACT\r\n");
-        		break;
-        	case FALLEN_3:
-                UART_Send("\n\nFALL CONFIRMED\r\n");
-                if (led_matrix_ready) {
-	        		Matrix_ShowSadFace();
-				}
-                if (oled_ready) {
-                	OLED_SetFallMessage(&oled);
-                }
-                break;
-        	case LONG_LIE_4:
-				UART_Send("\n\nLONG LIE ESCALATION: NO MOVEMENT\r\n");
-				if (oled_ready) {
-					OLED_SetLongLieMessage(&oled);
-				}
-        	}
+        /*================= UART LOGGING =====================================*/
+        LogStatus(fall_state, accel_magnitude, gyro_magnitude, loud_sound_detected, current_time);
 
-            previous_state = fall_state;
-        }
-
-		//	char message[256];
-		//	snprintf(message, sizeof(message),
-		//			 "Sample %lu\r\n"
-		//			 "Accel_Magnitude = %.3f\r\n"
-		//			 "Gyro_Magnitude  = %.3f\r\n"
-		//			 "Sound ADC       = %u\r\n"
-		//			 "Fall State      = %d\r\n"
-		//			 "======================\r\n",
-		//			 sample_number,
-		//			 accel_magnitude,
-		//			 gyro_magnitude,
-		//			 (unsigned int)sound_value,
-		//			 (int)fall_state);
-		//	UART_Send(message);
-		//	sample_number++;
-		//
-		//	char message[32];
-		//	snprintf(message, sizeof(message), "State = %d %.3f\r\n", (int)fall_state, accel_magnitude);
-		//	UART_Send(message);
-		//
-		//	static uint32_t last_uart_time = 0;
-		//	if ((current_time - last_uart_time) >= 0) {
-		//		char message[160];
-		//
-		//		snprintf(message, sizeof(message),
-		//				 "%d, %d, %6.2f, %6.2f, %5u\r\n",
-		//				 (int)current_time,
-		//				 (int)fall_state,
-		//				 accel_magnitude,
-		//				 gyro_magnitude,
-		//				 (unsigned int)sound_value);
-		//
-		//		UART_Send(message);
-		//		last_uart_time = current_time;
-		//	}
-
-        static uint32_t last_log_time = 0;
-
-        if ((current_time - last_log_time) >= 250U) {
-			char log_message[160];
-			snprintf(log_message, sizeof(log_message),
-					 "Time: %6u | State: %d | Accel: %6.2f | Gyro: %6.2f | Impact Sound: %u\r\n",
-					 (unsigned int) current_time,
-					 (int) fall_state,
-					 accel_magnitude,
-					 gyro_magnitude,
-					 impact_sound_detected);
-			UART_Send(log_message);
-			last_log_time = current_time;
-        }
-
-		/* 20ms delay for 50 samples per second */
+        /* Nominal 20 ms delay; actual loop period is slightly longer. At most 50 samples per second */
         HAL_Delay(20);
-        /*=========================== Our Addition ^ ===========================*/
-
-		//	BSP_LED_Toggle(LED2);
-		//	HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
     }
-}
-
-int ewma_filter_C(int new_data, int old_output, int alpha_percent) {
-    /* Reference implementation for verification only. The assembly routine
-     * must be used in the actual sensor-processing and detection pipeline. */
-    int numerator = alpha_percent * new_data + (100 - alpha_percent) * old_output;
-    return numerator / 100;
-}
-
-static void UART_Send(const char *text) {
-    HAL_UART_Transmit(&huart1, (uint8_t *)text, strlen(text), HAL_MAX_DELAY);
 }
 
 static void UART1_Init(void) {
@@ -443,8 +282,231 @@ static void UART1_Init(void) {
         while (1) {}
     }
 }
+static void UART_Send(const char *text) {
+    HAL_UART_Transmit(&huart1, (uint8_t *)text, strlen(text), HAL_MAX_DELAY);
+}
 
-/*=============================== Our Addition v ===============================*/
+static FallState FallDetector_Update(
+    float accel_mps2,
+    float gyro_dps,
+    uint32_t current_time
+) {
+	// Tracks fall state
+    static FallState state = NORMAL_0;
+
+    // Compare against current time to get duration of current state.
+    static uint32_t state_start_time = 0;
+    static uint32_t last_motion_time = 0;
+
+    // Inactivity samples describes number of records detected as "low activity"
+    // Raises chance that the person has fallen and is incapacitated or unconscious
+    static uint16_t inactivity_samples = 0;
+
+    // Boolean checks
+    static uint8_t impact_accel_detected = 0;
+    static uint8_t impact_gyro_detected = 0;
+    static uint8_t fallen_movement_detected = 0;
+    static uint8_t long_lie_movement_detected = 0;
+
+    if (detector_reset_requested) {
+        state = NORMAL_0;
+
+        state_start_time           = 0;
+        last_motion_time           = 0;
+
+        inactivity_samples         = 0;
+
+        impact_accel_detected      = 0;
+        impact_gyro_detected       = 0;
+        fallen_movement_detected   = 0;
+        long_lie_movement_detected = 0;
+
+        detector_reset_requested = 0;
+    }
+
+    switch (state) {
+    case NORMAL_0: //possible: if within certain ms of each other it crosses the threshold
+        if (accel_mps2 < FREEFALL_THRESHOLD_MPS2) {
+            state = FREEFALL_1;
+            state_start_time = current_time;
+        }
+
+        break;
+
+    case FREEFALL_1:
+    	if (accel_mps2 > IMPACT_THRESHOLD_MPS2) {
+    		impact_accel_detected = 1;
+    	}
+
+		if (gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
+			impact_gyro_detected = 1;
+		}
+
+        if (impact_accel_detected && impact_gyro_detected) {
+            state = IMPACT_2;
+            state_start_time = current_time;
+        } else if ((current_time - state_start_time) > FREEFALL_TIMEOUT_MS) {
+        	state = NORMAL_0;
+            detector_reset_requested = 1;
+        }
+
+        break;
+
+    case IMPACT_2:
+        // Whether elderly is moving is based on the rotational speed and acceleration at rest
+        fallen_movement_detected =
+        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+    		(accel_mps2 < ACCEL_BASELINE - FALLEN_ACCEL_RANGE) ||
+    		(accel_mps2 > ACCEL_BASELINE + FALLEN_ACCEL_RANGE);
+
+        // Person is relatively still after the possible impact.
+        if (!fallen_movement_detected) {
+            inactivity_samples++;
+        } else {
+            inactivity_samples = 0;
+        }
+
+        if ((current_time - state_start_time) > IMPACT_TIMEOUT_MS) {
+            // Confirmed fall only if the person became still for an extended period of time
+            if (inactivity_samples >= MIN_NUM_OF_INACTIVITY_SAMPLES) {
+                state = FALLEN_3;
+                state_start_time = current_time;
+                last_motion_time = current_time;
+            } else {
+            	state = NORMAL_0;
+                detector_reset_requested = 1;
+            }
+        }
+
+        break;
+
+    case FALLEN_3:
+        // Whether elderly is moving is based on the rotational speed and acceleration at rest
+        long_lie_movement_detected =
+        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+    		(accel_mps2 < ACCEL_BASELINE - LONG_LIE_ACCEL_RANGE) ||
+    		(accel_mps2 > ACCEL_BASELINE + LONG_LIE_ACCEL_RANGE);
+
+        if (long_lie_movement_detected) {
+            // The person moved, so restart the long-lie timer.
+            last_motion_time = current_time;
+        } else if ((current_time - last_motion_time) >= LONG_LIE_TIMEOUT_MS) {
+            state = LONG_LIE_4;
+            state_start_time = current_time;
+        }
+
+        break;
+
+    case LONG_LIE_4:
+        // Stay confirmed until the user resets the device
+    	break;
+    }
+
+    return state;
+}
+static void UpdateSoundStatus(uint16_t sound_value, uint32_t current_time) {
+	// Sound value at normal conditions
+	static float sound_baseline = 1000.0f;
+	// Number of consecutive loud sound samples
+	static uint16_t loud_sound_samples = 0;
+	// Compare against current time to get duration of current state.
+	static uint32_t last_loud_sound_time = 0;
+
+	// Sound constants
+	const float MAX_SOUND_DIFF = 2000.0f;
+	const uint16_t MIN_NUM_OF_LOUD_SOUND_SAMPLES = 5U;
+	const uint32_t IMPACT_SOUND_TIMEOUT_MS = 5000U;   // 5 second timeout
+
+	// Estimate the normal sound level.
+	sound_baseline = (0.99f * sound_baseline) + (0.01f * (float)sound_value);
+
+	float sound_difference = fabsf((float)sound_value - sound_baseline);
+
+	if (sound_difference > MAX_SOUND_DIFF) {
+		loud_sound_samples++;
+	} else {
+		loud_sound_samples = 0;
+	}
+
+	if (loud_sound_samples >= MIN_NUM_OF_LOUD_SOUND_SAMPLES) {
+		loud_sound_detected = 1;
+		last_loud_sound_time = current_time;
+	}
+
+	if ((current_time - last_loud_sound_time) > IMPACT_SOUND_TIMEOUT_MS) {
+		loud_sound_detected = 0;
+	}
+
+}
+static void UpdateBuzzer(FallState fall_state, uint32_t current_time) {
+    static uint8_t buzzer_state = 0;
+    static uint32_t last_buzzer_toggle = 0;
+    uint32_t buzzer_period = (fall_state == LONG_LIE_4) ? 250U : 500U;
+
+    if (!fall_detected) {
+    	buzzer_state = 0;
+    	Buzzer_Set(0);
+    } else if (current_time - last_buzzer_toggle >= buzzer_period){
+        buzzer_state = !buzzer_state;
+        Buzzer_Set(buzzer_state);
+        last_buzzer_toggle = current_time;
+    }
+}
+static void HandleFallStateChange(FallState fall_state) {
+	static FallState previous_state = NORMAL_0;
+
+	if (fall_state != previous_state) {
+		switch (fall_state) {
+		case NORMAL_0:
+			UART_Send("\n\nNORMAL\r\n");
+			break;
+		case FREEFALL_1:
+			UART_Send("\n\nFREEFALL\r\n");
+			break;
+		case IMPACT_2:
+			UART_Send("\n\nIMPACT\r\n");
+			break;
+		case FALLEN_3:
+			UART_Send("\n\nFALL CONFIRMED\r\n");
+			if (led_matrix_ready) {
+				Matrix_ShowSadFace();
+			}
+			if (oled_ready) {
+				OLED_SetFallMessage(&oled);
+			}
+			break;
+		case LONG_LIE_4:
+			UART_Send("\n\nLONG LIE ESCALATION: NO MOVEMENT\r\n");
+			if (oled_ready) {
+				OLED_SetLongLieMessage(&oled);
+			}
+		}
+
+		previous_state = fall_state;
+	}
+}
+static void LogStatus(
+		FallState fall_state,
+		float accel_magnitude,
+		float gyro_magnitude,
+		uint8_t loud_sound_detected,
+		uint32_t current_time) {
+    static uint32_t last_log_time = 0;
+
+    if ((current_time - last_log_time) >= 250U) {
+		char log_message[160];
+		snprintf(log_message, sizeof(log_message),
+				 "Time: %6u | State: %d | Accel: %6.2f | Gyro: %6.2f | Possible Impact Sound: %u\r\n",
+				 (unsigned int) current_time,
+				 (int) fall_state,
+				 accel_magnitude,
+				 gyro_magnitude,
+				 loud_sound_detected);
+		UART_Send(log_message);
+		last_log_time = current_time;
+    }
+}
+
 static void External_Peripherals_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
@@ -566,6 +628,7 @@ static uint8_t I2C_DevicePresent(uint16_t address) {
         100
     ) == HAL_OK;
 }
+
 static uint16_t SoundSensor_Read(void) {
     uint16_t value = 0;
 
@@ -579,142 +642,6 @@ static uint16_t SoundSensor_Read(void) {
 
     return value;       /* 0 to 4095 */
 }
-
-/* FallDetector_Update is called by main once every 20ms (depending on HAL_Delay at the end) */
-/* THIS FUNCTION IS VERY IMPORTANT */
-static FallState FallDetector_Update(
-    float accel_mps2,
-    float gyro_dps,
-    uint32_t current_time
-) {
-	// Tracks fall state
-    static FallState state = NORMAL_0;
-
-    // Compare against current time to get duration of current state.
-    static uint32_t state_start_time = 0;
-    static uint32_t last_motion_time = 0;
-
-    // Inactivity samples describes number of records detected as "low activity"
-    // Raises chance that the person has fallen and is incapacitated or unconscious
-    static uint16_t inactivity_samples = 0;
-
-    // Boolean checks
-    static uint8_t impact_accel_detected = 0;
-    static uint8_t impact_gyro_detected = 0;
-    static uint8_t fallen_movement_detected = 0;
-    static uint8_t long_lie_movement_detected = 0;
-
-    // Threshold constants, used to compare against active values
-    const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
-    const float IMPACT_THRESHOLD_MPS2   = 16.0f;
-    const float ACCEL_BASELINE          = 10.0f;
-    const float FALLEN_ACCEL_RANGE      = 4.0f;
-    const float LONG_LIE_ACCEL_RANGE    = 5.0f;
-    const float GYRO_DPS_THRESHOLD_MAX  = 90.0f; // DPS is degrees-per-second
-    const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
-
-    const uint32_t FREEFALL_TIMEOUT_MS     = 1000U;   // 1 second timeout
-    const uint32_t IMPACT_TIMEOUT_MS       = 2500U;   // 2.5 second timeout
-    const uint32_t LONG_LIE_TIMEOUT_MS     = (DEMO_MODE) ? 5000U : 600000U; // for demo, 5000; for irl, 10 minute
-    const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 45U;
-
-    if (detector_reset_requested) {
-        state = NORMAL_0;
-
-        state_start_time           = 0;
-        last_motion_time           = 0;
-
-        inactivity_samples         = 0;
-
-        impact_accel_detected      = 0;
-        impact_gyro_detected       = 0;
-        fallen_movement_detected   = 0;
-        long_lie_movement_detected = 0;
-
-        detector_reset_requested = 0;
-    }
-
-    switch (state) {
-    case NORMAL_0: //possible: if within certain ms of each other it crosses the threshold
-        if (accel_mps2 < FREEFALL_THRESHOLD_MPS2) {
-            state = FREEFALL_1;
-            state_start_time = current_time;
-        }
-
-        break;
-
-    case FREEFALL_1:
-    	if (accel_mps2 > IMPACT_THRESHOLD_MPS2) {
-    		impact_accel_detected = 1;
-    	}
-
-		if (gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
-			impact_gyro_detected = 1;
-		}
-
-        if (impact_accel_detected && impact_gyro_detected) {
-            state = IMPACT_2;
-            state_start_time = current_time;
-        } else if ((current_time - state_start_time) > FREEFALL_TIMEOUT_MS) {
-        	state = NORMAL_0;
-            detector_reset_requested = 1;
-        }
-
-        break;
-
-    case IMPACT_2:
-        // Whether elderly is moving is based on the rotational speed and acceleration at rest
-        fallen_movement_detected =
-        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
-    		(accel_mps2 < ACCEL_BASELINE - FALLEN_ACCEL_RANGE) ||
-    		(accel_mps2 > ACCEL_BASELINE + FALLEN_ACCEL_RANGE);
-
-        // Person is relatively still after the possible impact.
-        if (!fallen_movement_detected) {
-            inactivity_samples++;
-        } else {
-            inactivity_samples = 0;
-        }
-
-        if ((current_time - state_start_time) > IMPACT_TIMEOUT_MS) {
-            // Confirmed fall only if the person became still for an extended period of time
-            if (inactivity_samples >= MIN_NUM_OF_INACTIVITY_SAMPLES) {
-                state = FALLEN_3;
-                state_start_time = current_time;
-                last_motion_time = current_time;
-            } else {
-            	state = NORMAL_0;
-                detector_reset_requested = 1;
-            }
-        }
-
-        break;
-
-    case FALLEN_3:
-        // Whether elderly is moving is based on the rotational speed and acceleration at rest
-        long_lie_movement_detected =
-        	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
-    		(accel_mps2 < ACCEL_BASELINE - LONG_LIE_ACCEL_RANGE) ||
-    		(accel_mps2 > ACCEL_BASELINE + LONG_LIE_ACCEL_RANGE);
-
-        if (long_lie_movement_detected) {
-            // The person moved, so restart the long-lie timer.
-            last_motion_time = current_time;
-        } else if ((current_time - last_motion_time) >= LONG_LIE_TIMEOUT_MS) {
-            state = LONG_LIE_4;
-            state_start_time = current_time;
-        }
-
-        break;
-
-    case LONG_LIE_4:
-        // Stay confirmed until the user resets the device
-    	break;
-    }
-
-    return state;
-}
-
 static void Buzzer_Set(uint8_t enabled) {
     HAL_GPIO_WritePin(
         GPIOB,
@@ -795,21 +722,20 @@ static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_WriteString(display, "CALL 995");
     SSD1306_Update(display);
 }
+
 void HAL_SYSTICK_Callback(void) {
-	// NOTE: must add "HAL_SYSTICK_IRQHandler();" to
+	// NOTE: Added "HAL_SYSTICK_IRQHandler();" to
 	// "void SysTick_Handler(void)" in stm32l4xx.it.c
 
     static uint32_t elapsed_ms = 0;
     static uint8_t previous_mode = 0xFF;
 
-    if (!led_timer_enabled)
-    {
+    if (!led_timer_enabled) {
         return;
     }
 
     // Restart the timing when the fall state changes
-    if (led_fall_mode != previous_mode)
-    {
+    if (led_fall_mode != previous_mode) {
         elapsed_ms = 0;
         previous_mode = led_fall_mode;
         BSP_LED_Off(LED2);
@@ -819,8 +745,7 @@ void HAL_SYSTICK_Callback(void) {
 
     uint32_t toggle_period = led_fall_mode ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS;
 
-    if (elapsed_ms >= toggle_period)
-    {
+    if (elapsed_ms >= toggle_period) {
         elapsed_ms = 0;
         BSP_LED_Toggle(LED2);
     }
@@ -829,17 +754,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     static uint32_t last_press_time = 0;
     uint32_t current_time = HAL_GetTick();
 
-    if (GPIO_Pin == BUTTON_EXTI13_Pin)
-    {
+    if (GPIO_Pin == BUTTON_EXTI13_Pin) {
         // Ignore switch bounce for 250 ms
-        if ((current_time - last_press_time) > 250U)
-        {
+        if ((current_time - last_press_time) > 250U) {
             reset_requested = 1;
             last_press_time = current_time;
         }
     }
 }
-/*=============================== Our Addition ^ ===============================*/
 
 /* Do not modify these lines. They suppress UART-related warnings. */
 int _write(int file, char *ptr, int len)
