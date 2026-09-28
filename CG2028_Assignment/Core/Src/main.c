@@ -542,37 +542,46 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     // Boolean checks
     static uint8_t impact_sound_detected = 0;
-    static uint8_t movement_detected = 0;
+    static uint8_t fallen_movement_detected = 0;
+    static uint8_t long_lie_movement_detected = 0;
 
     // Sound variable
     static float sound_baseline = 1000.0f;
 
     // Threshold constants, used to compare against active values
-    const float FREEFALL_MPS2          = 6.00f; // MPS2 is metres per second squared
-    const float IMPACT_MPS2            = 12.0f;
-    const float ACCEL_BASELINE         = 10.0f;
-    const float GYRO_DPS_THRESHOLD_MAX = 200.0f; // DPS is degrees-per-second
-    const float GYRO_DPS_THRESHOLD_MIN = 30.0f; // Threshold for checking
-    const float MAX_SOUND_DIFF         = 2000.0f;
+    const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
+    const float IMPACT_THRESHOLD_MPS2   = 12.0f;
+    const float ACCEL_BASELINE          = 10.0f;
+    const float FALLEN_ACCEL_RANGE      = 3.0f;
+    const float LONG_LIE_ACCEL_RANGE    = 3.0f;
+    const float GYRO_DPS_THRESHOLD_MAX  = 200.0f; // DPS is degrees-per-second
+    const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
+    const float MAX_SOUND_DIFF          = 2000.0f;
 
     const uint32_t IMPACT_SOUND_TIMEOUT_MS = 5000U;   // 5 second timeout
-    const uint32_t NEAR_FALL_TIMEOUT_MS    = 1000U;   // 1 second timeout
-    const uint32_t CANDIDATE_TIMEOUT_MS    = 5000U;   // 5 second timeout
-    //const uint32_t LONG_LIE_TIMEOUT_MS     = 300000U; // 5 minute timeout
-    const uint32_t LONG_LIE_TIMEOUT_MS     = 5000U;
+    const uint32_t FREEFALL_TIMEOUT_MS     = 1000U;   // 1 second timeout
+    const uint32_t IMPACT_TIMEOUT_MS       = 5000U;   // 5 second timeout
+    const uint32_t LONG_LIE_TIMEOUT_MS     = 600000U; // 10 minute timeout
+//    const uint32_t LONG_LIE_TIMEOUT_MS     = 5000U;
     const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 100U;
     const uint16_t MIN_NUM_OF_LOUD_SOUND_SAMPLES = 5U;
 
     if (detector_reset_requested) {
         state = NORMAL_0;
-        state_start_time       = 0;
-        last_motion_time       = 0;
-        last_impact_sound_time = 0;
-        loud_sound_samples     = 0;
-        inactivity_samples     = 0;
-        impact_sound_detected  = 0;
-        movement_detected      = 0;
-        sound_baseline = 2048.0f;
+
+        state_start_time           = 0;
+        last_motion_time           = 0;
+        last_impact_sound_time     = 0;
+
+        loud_sound_samples         = 0;
+        inactivity_samples         = 0;
+
+        impact_sound_detected      = 0;
+
+        fallen_movement_detected   = 0;
+        long_lie_movement_detected = 0;
+        
+        sound_baseline             = 2048.0f;
 
         detector_reset_requested = 0;
     }
@@ -595,35 +604,37 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     if ((current_time - last_impact_sound_time) > IMPACT_SOUND_TIMEOUT_MS) {
     	impact_sound_detected = 0;
-    	last_impact_sound_time = current_time;
     }
 
-    // Whether elderly is moving is based on the rotational speed and acceleration at rest
-    movement_detected =
+    // Whether elderly is moving is based on the
+    // rotational speed and acceleration at rest
+    fallen_movement_detected =
     	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
-		(accel_mps2 < ACCEL_BASELINE - 3.0f) ||
-		(accel_mps2 > ACCEL_BASELINE + 3.0f);
+		(accel_mps2 < ACCEL_BASELINE - FALLEN_ACCEL_RANGE) ||
+		(accel_mps2 > ACCEL_BASELINE + FALLEN_ACCEL_RANGE);
+
+    long_lie_movement_detected =
+    	(gyro_dps >= GYRO_DPS_THRESHOLD_MIN) ||
+		(accel_mps2 < ACCEL_BASELINE - LONG_LIE_ACCEL_RANGE) ||
+		(accel_mps2 > ACCEL_BASELINE + LONG_LIE_ACCEL_RANGE);
 
     switch (state) {
     case NORMAL_0:
-        if (accel_mps2 < FREEFALL_MPS2 || gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
+        if (accel_mps2 < FREEFALL_THRESHOLD_MPS2 || gyro_dps > GYRO_DPS_THRESHOLD_MAX) {
             state = FREEFALL_1;
             state_start_time = current_time;
-        }
-        /*
-        else if (accel_mps2 > IMPACT_MPS2 || impact_sound_detected) {
+        } else if (accel_mps2 > IMPACT_THRESHOLD_MPS2 && impact_sound_detected) {
 			state = IMPACT_2;
 			state_start_time = current_time;
         }
-        */
 
         break;
 
     case FREEFALL_1:
-        if (accel_mps2 > IMPACT_MPS2 || impact_sound_detected) {
+        if (accel_mps2 > IMPACT_THRESHOLD_MPS2 || impact_sound_detected) {
             state = IMPACT_2;
             state_start_time = current_time;
-        } else if ((current_time - state_start_time) > NEAR_FALL_TIMEOUT_MS) {
+        } else if ((current_time - state_start_time) > FREEFALL_TIMEOUT_MS) {
             detector_reset_requested = 1;
         }
 
@@ -631,13 +642,13 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
 
     case IMPACT_2:
         // Person is relatively still after the possible impact.
-        if (!movement_detected) {
+        if (!fallen_movement_detected) {
             inactivity_samples++;
         } else {
             inactivity_samples = 0;
         }
 
-        if ((current_time - state_start_time) > CANDIDATE_TIMEOUT_MS) {
+        if ((current_time - state_start_time) > IMPACT_TIMEOUT_MS) {
             // Confirmed fall only if the person became still for an extended period of time
             if (inactivity_samples >= MIN_NUM_OF_INACTIVITY_SAMPLES) {
                 state = FALLEN_3;
@@ -651,7 +662,7 @@ static FallState FallDetector_Update( // THIS ONEEEEEEEEEEE ==================
         break;
 
     case FALLEN_3:
-        if (movement_detected) {
+        if (long_lie_movement_detected) {
             // The person moved, so restart the long-lie timer.
             last_motion_time = current_time;
         } else if ((current_time - last_motion_time) >= LONG_LIE_TIMEOUT_MS) {
