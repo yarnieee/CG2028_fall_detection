@@ -7,43 +7,70 @@
 #define MAX_LENGTH 400	// adjust it depending on the max size of the packet you expect to send or receive
 #define WIFI_READ_TIMEOUT 10000
 #define WIFI_WRITE_TIMEOUT 10000
-//#define USING_IOT_SERVER // This line should be commented out if using Packet Sender (not IoT server connection)
 
-const char* WiFi_SSID = "DIDSBSAYYOGA";				// Replacce mySSID with WiFi SSID for your router / Hotspot
-const char* WiFi_password = "5\5F987i";	// Replace myPassword with WiFi password for your router / Hotspot
+const char* WiFi_SSID = "DIDSBSAYYOGA";	// Replacce mySSID with WiFi SSID for your router / Hotspot
+const char* WiFi_password = "5\\5F987i"; // Replace myPassword with WiFi password for your router / Hotspot
 const WIFI_Ecn_t WiFi_security = WIFI_ECN_WPA2_PSK;	// WiFi security your router / Hotspot. No need to change it unless you use something other than WPA2 PSK
-const uint16_t SOURCE_PORT = 1234;	// source port, which can be almost any 16 bit number
+const uint16_t SOURCE_PORT = 1234; // source port, which can be almost any 16 bit number
 
-uint8_t ipaddr[4] = {192, 168, 173, 1}; // IP address of your laptop wireless lan adapter, which is the one you successfully used to test Packet Sender above.
-									// If using IoT platform, this will be overwritten by DNS lookup, so the values of x and y doesn't matter
-											//(it should still be filled in with numbers 0-255 to avoid compilation errors)
+uint8_t ipaddr[4] = {10, 237, 248, 129}; // IP address of your laptop wireless lan adapter, which is the one you successfully used to test Packet Sender above.
 
-const uint16_t DEST_PORT = 2028;		// 'server' port number - this is the port Packet Sender listens to (as you set in Packer Sender)
-												// and should be allowed by the OS firewall
+const uint16_t DEST_PORT = 2028; // 'server' port number - this is the port Packet Sender listens to (as you set in Packer Sender) and should be allowed by the OS firewall
 SPI_HandleTypeDef hspi3;
+
+
+static void UART1_Init(void);
+static void UART_Send(const char *text);
 
 int main(void) {
   HAL_Init();
+  UART1_Init();
 
   uint8_t req[MAX_LENGTH];	// request packet
   uint8_t resp[MAX_LENGTH];	// response packet
   uint16_t Datalen;
   WIFI_Status_t WiFi_Stat; // WiFi status. Should remain WIFI_STATUS_OK if everything goes well
 
-  WiFi_Stat = WIFI_Init();						// if it gets stuck here, you likely did not include EXTI1_IRQHandler() in stm32l4xx_it.c as mentioned above
+  WiFi_Stat = WIFI_Init(); // if it gets stuck here, you likely did not include EXTI1_IRQHandler() in stm32l4xx_it.c as mentioned above
+  if(WiFi_Stat != WIFI_STATUS_OK) {
+  	  UART_Send("WIFI_INIT FALIED\r\n");
+  	  while(1); // halt computations if a WiFi connection could not be established.
+  } else {
+	  UART_Send("WIFI_INIT SUCCESS\r\n");
+  }
+
   WiFi_Stat &= WIFI_Connect(WiFi_SSID, WiFi_password, WiFi_security); // joining a WiFi network takes several seconds. Don't be too quick to judge that your program has 'hung' :)
-  if(WiFi_Stat!=WIFI_STATUS_OK) while(1); 					// halt computations if a WiFi connection could not be established.
+  if(WiFi_Stat != WIFI_STATUS_OK) {
+	  UART_Send("WIFI_CONNECT FALIED\r\n");
+	  while(1); // halt computations if a WiFi connection could not be established.
+  } else {
+	  UART_Send("WIFI_CONNECT SUCCESS\r\n");
+  }
 
-  // WiFi_Stat = WIFI_Ping(ipaddr, 3, 200);					// Optional ping 3 times in 200 ms intervals
+  WiFi_Stat = WIFI_Ping(ipaddr, 3, 200);
+  if(WiFi_Stat != WIFI_STATUS_OK) {
+  	  UART_Send("PING FALIED\r\n");
+  } else {
+  	  UART_Send("PING SUCCESS\r\n");
+  }
+
   WiFi_Stat = WIFI_OpenClientConnection(1, WIFI_TCP_PROTOCOL, "conn", ipaddr, DEST_PORT, SOURCE_PORT); // Make a TCP connection.
-  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  // "conn" is just a name and serves no functional purpose
-
-  if(WiFi_Stat != WIFI_STATUS_OK) while(1); 					// halt computations if a connection could not be established with the server
+  if(WiFi_Stat != WIFI_STATUS_OK) {
+	  UART_Send("TCP CONNECTION FALIED\r\n");
+	  while(1); // halt computations if a connection could not be established with the server
+  } else {
+	  UART_Send("TCP CONNECTION SUCCESS\r\n");
+  }
 
   while (1) {
 	  int temper = rand()%40; // Just a random value for demo. Use the reading from sensors as appropriate
 	  sprintf((char*)req, "temperature : %d\r", temper);
 	  WiFi_Stat = WIFI_SendData(1, req, (uint16_t)strlen((char*)req), &Datalen, WIFI_WRITE_TIMEOUT);
+	  if(WiFi_Stat != WIFI_STATUS_OK) {
+		  UART_Send("SEND DATA FAILED\r\n");
+	  } else {
+		  UART_Send("SEND DATA SUCCESS\r\n");
+	  }
 	  HAL_Delay(1000);
   }
 }
@@ -80,8 +107,8 @@ void SPI3_IRQHandler(void) {
 #define NORMAL_LED_DELAY_MS        1000
 #define FALL_LED_DELAY_MS          150
 
-static void UART1_Init(void);
-static void UART_Send(const char *text);
+//static void UART1_Init(void);
+//static void UART_Send(const char *text);
 
 extern int ewma_filter(int new_data, int old_output, int alpha_percent);
 

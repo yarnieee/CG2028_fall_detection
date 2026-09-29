@@ -6,7 +6,6 @@
 ../Core/Src/es_wifi.c:201:31:ParseSecurity	16	static
 ../Core/Src/es_wifi.c:218:13:AT_ParseInfo	24	static
 ../Core/Src/es_wifi.c:268:13:AT_ParseAP	32	static
-../Core/Src/es_wifi.c:321:13:AT_ParseUARTConfig	24	static
 ../Core/Src/es_wifi.c:368:13:AT_ParseSystemConfig	24	static
 ../Core/Src/es_wifi.c:435:13:AT_ParseConnSettings	24	static
 ../Core/Src/es_wifi.c:510:13:AT_ParseTransportSettings	24	static
@@ -37,8 +36,6 @@
 ../Core/Src/es_wifi.c:1203:18:ES_WIFI_ResetModule	32	static
 ../Core/Src/es_wifi.c:1227:18:ES_WIFI_HardResetModule	24	static
 ../Core/Src/es_wifi.c:1242:18:ES_WIFI_SetProductName	24	static
-../Core/Src/es_wifi.c:1283:18:ES_WIFI_SetUARTBaudRate	24	static
-../Core/Src/es_wifi.c:1305:18:ES_WIFI_GetUARTConfig	24	static
 ../Core/Src/es_wifi.c:1327:18:ES_WIFI_GetSystemConfig	24	static
 ../Core/Src/es_wifi.c:1349:18:ES_WIFI_Ping	48	static
 ../Core/Src/es_wifi.c:1387:18:ES_WIFI_DNS_LookUp	32	static
