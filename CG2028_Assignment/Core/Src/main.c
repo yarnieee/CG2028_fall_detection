@@ -37,6 +37,7 @@ UART_HandleTypeDef huart1;
 
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
+#define SWITCH_ADDR  (0x03 << 1)
 
 typedef enum FallState {
     NORMAL_0,
@@ -124,6 +125,12 @@ int main(void) {
         led_matrix_ready = 1;
     } else {
         UART_Send("HT16K33 init failed\r\n");
+    }
+
+    if (???(&???, &hi2c1, SWITCH_ADDR) == HAL_OK) {
+        switch_ready = 1;
+    } else {
+        UART_Send("??? init failed\r\n");
     }
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
@@ -617,6 +624,15 @@ static void I2C_TestDevices(void) {
     else
     {
         UART_Send("LED matrix not detected\r\n");
+    }
+
+    if (I2C_DevicePresent(SWITCH_ADDR))
+    {
+        UART_Send("5 way switch detected\r\n");
+    }
+    else
+    {
+        UART_Send("5 way switch not detected\r\n");
     }
 }
 static uint8_t I2C_DevicePresent(uint16_t address) {
