@@ -1,3 +1,58 @@
+/* (c) EE2028, ECE, NUS */
+
+#include "main.h"
+#include "wifi.h"
+#include <stdlib.h>	// for rand(). Can be removed if valid sensor data is sent instead
+
+#define MAX_LENGTH 400	// adjust it depending on the max size of the packet you expect to send or receive
+#define WIFI_READ_TIMEOUT 10000
+#define WIFI_WRITE_TIMEOUT 10000
+//#define USING_IOT_SERVER // This line should be commented out if using Packet Sender (not IoT server connection)
+
+const char* WiFi_SSID = "DIDSBSAYYOGA";				// Replacce mySSID with WiFi SSID for your router / Hotspot
+const char* WiFi_password = "5\5F987i";	// Replace myPassword with WiFi password for your router / Hotspot
+const WIFI_Ecn_t WiFi_security = WIFI_ECN_WPA2_PSK;	// WiFi security your router / Hotspot. No need to change it unless you use something other than WPA2 PSK
+const uint16_t SOURCE_PORT = 1234;	// source port, which can be almost any 16 bit number
+
+uint8_t ipaddr[4] = {192, 168, 173, 1}; // IP address of your laptop wireless lan adapter, which is the one you successfully used to test Packet Sender above.
+									// If using IoT platform, this will be overwritten by DNS lookup, so the values of x and y doesn't matter
+											//(it should still be filled in with numbers 0-255 to avoid compilation errors)
+
+const uint16_t DEST_PORT = 2028;		// 'server' port number - this is the port Packet Sender listens to (as you set in Packer Sender)
+												// and should be allowed by the OS firewall
+SPI_HandleTypeDef hspi3;
+
+int main(void) {
+  HAL_Init();
+
+  uint8_t req[MAX_LENGTH];	// request packet
+  uint8_t resp[MAX_LENGTH];	// response packet
+  uint16_t Datalen;
+  WIFI_Status_t WiFi_Stat; // WiFi status. Should remain WIFI_STATUS_OK if everything goes well
+
+  WiFi_Stat = WIFI_Init();						// if it gets stuck here, you likely did not include EXTI1_IRQHandler() in stm32l4xx_it.c as mentioned above
+  WiFi_Stat &= WIFI_Connect(WiFi_SSID, WiFi_password, WiFi_security); // joining a WiFi network takes several seconds. Don't be too quick to judge that your program has 'hung' :)
+  if(WiFi_Stat!=WIFI_STATUS_OK) while(1); 					// halt computations if a WiFi connection could not be established.
+
+  // WiFi_Stat = WIFI_Ping(ipaddr, 3, 200);					// Optional ping 3 times in 200 ms intervals
+  WiFi_Stat = WIFI_OpenClientConnection(1, WIFI_TCP_PROTOCOL, "conn", ipaddr, DEST_PORT, SOURCE_PORT); // Make a TCP connection.
+  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  // "conn" is just a name and serves no functional purpose
+
+  if(WiFi_Stat != WIFI_STATUS_OK) while(1); 					// halt computations if a connection could not be established with the server
+
+  while (1) {
+	  int temper = rand()%40; // Just a random value for demo. Use the reading from sensors as appropriate
+	  sprintf((char*)req, "temperature : %d\r", temper);
+	  WiFi_Stat = WIFI_SendData(1, req, (uint16_t)strlen((char*)req), &Datalen, WIFI_WRITE_TIMEOUT);
+	  HAL_Delay(1000);
+  }
+}
+
+void SPI3_IRQHandler(void) {
+	HAL_SPI_IRQHandler(&hspi3);
+}
+
+
 /******************************************************************************
  * @file           : main.c
  * @brief          : CG2028 Assignment - ElderCare Wearable Safety Companion
@@ -6,7 +61,7 @@
  ******************************************************************************/
 
 /*--------------------------- Includes ---------------------------------------*/
-#include "main.h"
+//#include "main.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_accelero.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h"
 #include "../Inc/ssd1306.h"
@@ -85,7 +140,7 @@ static volatile uint8_t led_timer_enabled        = 0;
 const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
 const float IMPACT_THRESHOLD_MPS2   = 16.0f;
 const float ACCEL_BASELINE          = 10.0f;
-const float FALLEN_ACCEL_RANGE      = 4.0f;
+const float FALLEN_ACCEL_RANGE      = 3.0f;
 const float LONG_LIE_ACCEL_RANGE    = 5.0f;
 const float GYRO_DPS_THRESHOLD_MAX  = 90.0f; // DPS is degrees-per-second
 const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
@@ -93,152 +148,152 @@ const float GYRO_DPS_THRESHOLD_MIN  = 30.0f;
 const uint32_t FREEFALL_TIMEOUT_MS = 1000U;   // 1 second timeout
 const uint32_t IMPACT_TIMEOUT_MS   = 2500U;   // 2.5 second timeout
 const uint32_t LONG_LIE_TIMEOUT_MS = (DEMO_MODE) ? 5000U : 600000U; // Demo timeout: 5 seconds; Deployment timeout: 10 minutes
-const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 45U;
+const uint16_t MIN_NUM_OF_INACTIVITY_SAMPLES = 35U;
 
-int main(void) {
-    HAL_Init();
-    UART1_Init();
-
-    BSP_LED_Init(LED2);
-    BSP_ACCELERO_Init();
-    BSP_GYRO_Init();
-    BSP_LED_Off(LED2);
-
-    /*=============== LED AND RESET BUTTON INITIALISATION ====================*/
-    led_timer_enabled = 1;
-    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
-
-	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION ======*/
-    External_Peripherals_Init();
-    I2C_TestDevices();
-
-    if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK) {
-    	OLED_SetInitMessage(&oled);
-        oled_ready = 1;
-    } else {
-        UART_Send("SSD1306 init failed\r\n");
-    }
-
-    if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK) {
-        Matrix_ShowHappyFace();
-        led_matrix_ready = 1;
-    } else {
-        UART_Send("HT16K33 init failed\r\n");
-    }
-
-    /* Previous EWMA outputs. The first test/application sample starts from 0. */
-    int accel_ewma_asm[3] = {0, 0, 0};
-    int  gyro_ewma_asm[3] = {0, 0, 0};
-
-    /* Boolean check for filter initialization */
-    uint8_t filter_initialized = 0;
-
-    // while loop runs once every 20ms
-    while (1) {
-        int16_t accel_raw_i16[3] = {0, 0, 0};
-        float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
-        int      gyro_raw_int[3] = {0, 0, 0};
-
-        BSP_ACCELERO_AccGetXYZ(accel_raw_i16);
-        BSP_GYRO_GetXYZ(gyro_raw_float);
-
-        /* The supplied BSP reports gyroscope readings as floating-point raw
-         * values. Convert them to signed integers before passing them to the
-         * integer assembly routine. */
-        for (int axis = 0; axis < 3; axis++) {
-            gyro_raw_int[axis] = (int)gyro_raw_float[axis];
-        }
-
-        if (!filter_initialized) {
-        	/* Use the first real sensor readings as the initial filter state.*/
-			for (int axis = 0; axis < 3; axis++) {
-				accel_ewma_asm[axis] = (int)accel_raw_i16[axis];
-				gyro_ewma_asm[axis] = gyro_raw_int[axis];
-			}
-
-			filter_initialized = 1;
-        } else {
-        	/* Apply EWMA from the second sample onward.*/
-			for (int axis = 0; axis < 3; axis++) {
-				accel_ewma_asm[axis] = ewma_filter(
-					(int)accel_raw_i16[axis],
-					accel_ewma_asm[axis],
-					EWMA_ALPHA_ACCEL_PERCENT);
-
-				gyro_ewma_asm[axis] = ewma_filter(
-					gyro_raw_int[axis],
-					gyro_ewma_asm[axis],
-					EWMA_ALPHA_GYRO_PERCENT);
-			}
-        }
-
-        /* Accelerometer filtered readings are in meters per second squared. */
-        float accel_mps2[3] = {
-            accel_ewma_asm[0] * (9.80665f / 1000.0f),
-            accel_ewma_asm[1] * (9.80665f / 1000.0f),
-            accel_ewma_asm[2] * (9.80665f / 1000.0f)
-        };
-
-        /* Gyroscope filtered readings are in degrees per second. */
-        float gyro_dps[3] = {
-            gyro_ewma_asm[0] / 1000.0f,
-            gyro_ewma_asm[1] / 1000.0f,
-            gyro_ewma_asm[2] / 1000.0f
-        };
-
-        /**************** Elderly wearable state logic starts here**************
-         * Compulsory requirements:
-         * 1. Use filtered accelerometer AND gyroscope readings.
-         * 2. Distinguish normal activity, near-fall movements, and a real fall.
-         * 3. Use a slow LED blink for normal operation and a fast blink after
-         *    a fall is detected.
-         **********************************************************************/
-
-		/*========================== Input Readings ============================*/
-
-        float accel_magnitude =
-            sqrtf(accel_mps2[0] * accel_mps2[0] +
-                  accel_mps2[1] * accel_mps2[1] +
-                  accel_mps2[2] * accel_mps2[2]);
-
-        float gyro_magnitude =
-            sqrtf(gyro_dps[0] * gyro_dps[0] +
-                  gyro_dps[1] * gyro_dps[1] +
-                  gyro_dps[2] * gyro_dps[2]);
-
-        uint16_t sound_value = SoundSensor_Read();
-
-        uint32_t current_time = HAL_GetTick();
-
-		/*===================== Process Input Readings =======================*/
-        /*===================== FALL DETECTOR MACHINE ========================*/
-        /* Fall detector machine is called here, every cycle of main () */
-        /* THIS FUNCTION IS VERY IMPORTANT */
-        FallState fall_state = FallDetector_Update(accel_magnitude, gyro_magnitude, current_time);
-        fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
-        led_fall_mode = fall_detected;
-
-		/*===================== SOUND SENSOR =================================*/
-        UpdateSoundStatus(sound_value, current_time);
-
-		/*========================== Outputs =================================*/
-		/*========================== BUZZER ==================================*/
-        UpdateBuzzer(fall_state, current_time);
-
-		/*=============== UART, LED MATRIX AND OLED ==========================*/
-        HandleFallStateChange(fall_state);
-
-        /*================= UART LOGGING =====================================*/
-        LogStatus(fall_state, accel_magnitude, gyro_magnitude, loud_sound_detected, current_time);
-
-        if (reset_requested) {
-        	ProcessResetRequest();
-        }
-
-        /* Nominal 20 ms delay; actual loop period is slightly longer. At most 50 samples per second */
-        HAL_Delay(20);
-    }
-}
+//int main(void) {
+//    HAL_Init();
+//    UART1_Init();
+//
+//    BSP_LED_Init(LED2);
+//    BSP_ACCELERO_Init();
+//    BSP_GYRO_Init();
+//    BSP_LED_Off(LED2);
+//
+//    /*=============== LED AND RESET BUTTON INITIALISATION ====================*/
+//    led_timer_enabled = 1;
+//    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
+//
+//	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION ======*/
+//    External_Peripherals_Init();
+//    I2C_TestDevices();
+//
+//    if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK) {
+//    	OLED_SetInitMessage(&oled);
+//        oled_ready = 1;
+//    } else {
+//        UART_Send("SSD1306 init failed\r\n");
+//    }
+//
+//    if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK) {
+//        Matrix_ShowHappyFace();
+//        led_matrix_ready = 1;
+//    } else {
+//        UART_Send("HT16K33 init failed\r\n");
+//    }
+//
+//    /* Previous EWMA outputs. The first test/application sample starts from 0. */
+//    int accel_ewma_asm[3] = {0, 0, 0};
+//    int  gyro_ewma_asm[3] = {0, 0, 0};
+//
+//    /* Boolean check for filter initialization */
+//    uint8_t filter_initialized = 0;
+//
+//    // while loop runs once every 20ms
+//    while (1) {
+//        int16_t accel_raw_i16[3] = {0, 0, 0};
+//        float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
+//        int      gyro_raw_int[3] = {0, 0, 0};
+//
+//        BSP_ACCELERO_AccGetXYZ(accel_raw_i16);
+//        BSP_GYRO_GetXYZ(gyro_raw_float);
+//
+//        /* The supplied BSP reports gyroscope readings as floating-point raw
+//         * values. Convert them to signed integers before passing them to the
+//         * integer assembly routine. */
+//        for (int axis = 0; axis < 3; axis++) {
+//            gyro_raw_int[axis] = (int)gyro_raw_float[axis];
+//        }
+//
+//        if (!filter_initialized) {
+//        	/* Use the first real sensor readings as the initial filter state.*/
+//			for (int axis = 0; axis < 3; axis++) {
+//				accel_ewma_asm[axis] = (int)accel_raw_i16[axis];
+//				gyro_ewma_asm[axis] = gyro_raw_int[axis];
+//			}
+//
+//			filter_initialized = 1;
+//        } else {
+//        	/* Apply EWMA from the second sample onward.*/
+//			for (int axis = 0; axis < 3; axis++) {
+//				accel_ewma_asm[axis] = ewma_filter(
+//					(int)accel_raw_i16[axis],
+//					accel_ewma_asm[axis],
+//					EWMA_ALPHA_ACCEL_PERCENT);
+//
+//				gyro_ewma_asm[axis] = ewma_filter(
+//					gyro_raw_int[axis],
+//					gyro_ewma_asm[axis],
+//					EWMA_ALPHA_GYRO_PERCENT);
+//			}
+//        }
+//
+//        /* Accelerometer filtered readings are in meters per second squared. */
+//        float accel_mps2[3] = {
+//            accel_ewma_asm[0] * (9.80665f / 1000.0f),
+//            accel_ewma_asm[1] * (9.80665f / 1000.0f),
+//            accel_ewma_asm[2] * (9.80665f / 1000.0f)
+//        };
+//
+//        /* Gyroscope filtered readings are in degrees per second. */
+//        float gyro_dps[3] = {
+//            gyro_ewma_asm[0] / 1000.0f,
+//            gyro_ewma_asm[1] / 1000.0f,
+//            gyro_ewma_asm[2] / 1000.0f
+//        };
+//
+//        /**************** Elderly wearable state logic starts here**************
+//         * Compulsory requirements:
+//         * 1. Use filtered accelerometer AND gyroscope readings.
+//         * 2. Distinguish normal activity, near-fall movements, and a real fall.
+//         * 3. Use a slow LED blink for normal operation and a fast blink after
+//         *    a fall is detected.
+//         **********************************************************************/
+//
+//		/*========================== Input Readings ============================*/
+//
+//        float accel_magnitude =
+//            sqrtf(accel_mps2[0] * accel_mps2[0] +
+//                  accel_mps2[1] * accel_mps2[1] +
+//                  accel_mps2[2] * accel_mps2[2]);
+//
+//        float gyro_magnitude =
+//            sqrtf(gyro_dps[0] * gyro_dps[0] +
+//                  gyro_dps[1] * gyro_dps[1] +
+//                  gyro_dps[2] * gyro_dps[2]);
+//
+//        uint16_t sound_value = SoundSensor_Read();
+//
+//        uint32_t current_time = HAL_GetTick();
+//
+//		/*===================== Process Input Readings =======================*/
+//        /*===================== FALL DETECTOR MACHINE ========================*/
+//        /* Fall detector machine is called here, every cycle of main () */
+//        /* THIS FUNCTION IS VERY IMPORTANT */
+//        FallState fall_state = FallDetector_Update(accel_magnitude, gyro_magnitude, current_time);
+//        fall_detected = (fall_state == FALLEN_3 || fall_state == LONG_LIE_4);
+//        led_fall_mode = fall_detected;
+//
+//		/*===================== SOUND SENSOR =================================*/
+//        UpdateSoundStatus(sound_value, current_time);
+//
+//		/*========================== Outputs =================================*/
+//		/*========================== BUZZER ==================================*/
+//        UpdateBuzzer(fall_state, current_time);
+//
+//		/*=============== UART, LED MATRIX AND OLED ==========================*/
+//        HandleFallStateChange(fall_state);
+//
+//        /*================= UART LOGGING =====================================*/
+//        LogStatus(fall_state, accel_magnitude, gyro_magnitude, loud_sound_detected, current_time);
+//
+//        if (reset_requested) {
+//        	ProcessResetRequest();
+//        }
+//
+//        /* Nominal 20 ms delay; actual loop period is slightly longer. At most 50 samples per second */
+//        HAL_Delay(20);
+//    }
+//}
 
 static void UART1_Init(void) {
     __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -752,6 +807,10 @@ void HAL_SYSTICK_Callback(void) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     static uint32_t last_press_time = 0;
     uint32_t current_time = HAL_GetTick();
+
+    if (GPIO_Pin == GPIO_PIN_1) {
+    	SPI_WIFI_ISR();
+    }
 
     if (GPIO_Pin == BUTTON_EXTI13_Pin) {
         // Ignore switch bounce for 250 ms
