@@ -20,7 +20,6 @@
 #include <float.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <stdlib.h>	// for rand(). Can be removed if valid sensor data is sent instead
 
 /*--------------------------- Configuration ----------------------------------*/
 #define EWMA_ALPHA_ACCEL_PERCENT   40
@@ -105,12 +104,16 @@ static volatile uint8_t led_fall_mode            = 0;
 static volatile uint8_t led_timer_enabled        = 0;
 
 // Wifi related constants
-const char* WiFi_SSID = "DIDSBSAYYOGA";
-const char* WiFi_password = "5\\5F987i";
+// Matt's Wifi
+//const char* WiFi_SSID = "DIDSBSAYYOGA";
+//const char* WiFi_password = "5\\5F987i";
+// Yi An's Wifi
+const char* WiFi_SSID = "NOT-A-MAC";
+const char* WiFi_password = "sF9@oZ6BX!";
 const WIFI_Ecn_t WiFi_security = WIFI_ECN_WPA2_PSK;	// WiFi security your router / Hotspot
 const uint16_t SOURCE_PORT = 1234;
 const uint16_t DEST_PORT = 2028; // 'server' port number - this is the port Packet Sender listens to
-uint8_t ipaddr[4] = {10, 237, 248, 129}; // IP address of our laptop wireless lan adapter
+uint8_t ipaddr[4] = {10, 249, 88, 87}; // IP address of our laptop wireless lan adapter
 
 // Threshold constants for FallDetector_Update(), used to compare against active values
 const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
@@ -156,11 +159,6 @@ int main(void) {
 
     // while loop runs once every 20ms
     while (1) {
-		//int temper = rand()%40; // Just a random value for demo. Use the reading from sensors as appropriate
-		//sprintf((char*)req, "temperature : %d\r", temper);
-		//WIFI_SendData(1, req, (uint16_t)strlen((char*)req), &Datalen, WIFI_WRITE_TIMEOUT);
-		//HAL_Delay(1000);
-
         int16_t accel_raw_i16[3] = {0, 0, 0};
         float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
         int      gyro_raw_int[3] = {0, 0, 0};
@@ -502,6 +500,7 @@ static void HandleFallStateChange(FallState fall_state) {
 
 	snprintf(state_message, sizeof(state_message), "\r\n%s\r\n", state_text);
 
+	// Sends
 	UART_Send(state_message);
 
 	uint16_t Datalen;
@@ -527,7 +526,13 @@ static void LogStatus(
 				 gyro_magnitude,
 				 loud_sound_detected);
 		UART_Send(log_message);
-
+		snprintf(log_message, sizeof(log_message),
+				 "%d, %6u, %6.2f, %6.2f, %u\r\n",
+				 (int) fall_state,
+				 (unsigned int) current_time,
+				 accel_magnitude,
+				 gyro_magnitude,
+				 loud_sound_detected);
 	    uint16_t Datalen;
 		WIFI_SendData(1, (uint8_t*)log_message, (uint16_t)strlen(log_message), &Datalen, WIFI_WRITE_TIMEOUT);
 		last_log_time = current_time;
@@ -731,43 +736,42 @@ static void I2C_Devices_Full_Init(void) {
 // Peripherals Helper Function Definitions
 static void ProcessSwitchEvents(void) {
     GroveMultiSwitch_EventTypeDef event;
-    static const char *const button_names[5] = {
-        "U", "L", "D", "R", "C"
-    };
 
     if (GroveMultiSwitch_ReadEvent(&grove_switch, &event) != HAL_OK ||
         !(event.event & GROVE_MULTI_SWITCH_EVENT_PRESENT)) {
         return;
     }
 
-    for (uint8_t index = 0U;
-         index < GroveMultiSwitch_GetButtonCount(&grove_switch) && index < 5U;
-         index++) {
-        char message[96];
-
-        if (event.button[index] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
-            snprintf(message, sizeof(message),
-                     "SW %s single click\r\n", button_names[index]);
-            UART_Send(message);
-        }
-        if (event.button[index] & GROVE_MULTI_SWITCH_DOUBLE_CLICK) {
-            snprintf(message, sizeof(message),
-                     "SW %s double click\r\n", button_names[index]);
-            UART_Send(message);
-        }
-        if (event.button[index] & GROVE_MULTI_SWITCH_LONG_PRESS) {
-            snprintf(message, sizeof(message),
-                     "SW %s long press\r\n", button_names[index]);
-            UART_Send(message);
-        }
-        if (event.button[index] & GROVE_MULTI_SWITCH_LEVEL_CHANGED) {
-            snprintf(message, sizeof(message),
-                     "SW %s %s\r\n",
-                     button_names[index],
-                     (event.button[index] & GROVE_MULTI_SWITCH_RAW_STATUS)
-                         ? "released" : "pressed");
-            UART_Send(message);
-        }
+    if (oled_ready) {
+	    if (event.button[0] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+    		SSD1306_Clear(&oled);
+			SSD1306_SetCursor(&oled, 16, 16);
+			SSD1306_WriteString(&oled, "NAME: OLD MAN");
+			SSD1306_SetCursor(&oled, 16, 32);
+			SSD1306_WriteString(&oled, "DOB: 1970-01-01");
+			SSD1306_Update(&oled);
+	    } else if (event.button[1] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+    		SSD1306_Clear(&oled);
+			SSD1306_SetCursor(&oled, 16, 16);
+			SSD1306_WriteString(&oled, "BLOOD TYPE: O");
+			SSD1306_SetCursor(&oled, 16, 32);
+			SSD1306_WriteString(&oled, "ALLERGIES: NA");
+			SSD1306_Update(&oled);
+	    } else if (event.button[2] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+    		SSD1306_Clear(&oled);
+			SSD1306_SetCursor(&oled, 16, 16);
+			SSD1306_WriteString(&oled, "AGE: 100");
+			SSD1306_Update(&oled);
+	    } else if (event.button[3] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+    		SSD1306_Clear(&oled);
+			SSD1306_SetCursor(&oled, 0, 16);
+			SSD1306_WriteString(&oled, "  HOME NUM: 8654 3210");
+			SSD1306_SetCursor(&oled, 0, 32);
+			SSD1306_WriteString(&oled, "FAMILY NUM: 8655 4322");
+			SSD1306_Update(&oled);
+	    } else if (event.button[4] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+    		OLED_SetInitMessage(&oled);
+    	}
     }
 }
 static uint16_t SoundSensor_Read(void) {
@@ -837,7 +841,7 @@ static void Matrix_ShowSadFace(void) {
 // OLED Helper Function Definitions
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Clear(display);
-    SSD1306_SetCursor(display, 16, 0);
+    SSD1306_SetCursor(display, 16, 16);
     SSD1306_WriteString(display, "FALL DETECTOR");
     SSD1306_SetCursor(display, 16, 32);
     SSD1306_WriteString(display, "SYSTEM READY");
@@ -850,7 +854,7 @@ static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display) {
 	SSD1306_SetCursor(display, 0, 16);
 	SSD1306_WriteString(display, "FAMILY NUM: 8655 4322");
 	SSD1306_SetCursor(display, 8, 32);
-	SSD1306_WriteString(display, "NAME: TAN WEI SONG");
+	SSD1306_WriteString(display, "NAME: OLD MAN");
 	SSD1306_SetCursor(display, 8, 48);
 	SSD1306_WriteString(display, "AGE: 85");
 	SSD1306_Update(display);
@@ -915,16 +919,16 @@ void SPI3_IRQHandler(void) {
 }
 
 /* Do not modify these lines. They suppress UART-related warnings. */
-int _write(int file, char *ptr, int len)
-{
-	(void)file;
-	(void)ptr;
-	return len;
-}
-int _read(int file, char *ptr, int len) { (void)file; (void)ptr; (void)len; return 0; }
-int _fstat(int file, struct stat *st) { (void)file; (void)st; return 0; }
-int _lseek(int file, int ptr, int dir) { (void)file; (void)ptr; (void)dir; return 0; }
-int _isatty(int file) { (void)file; return 1; }
-int _close(int file) { (void)file; return -1; }
-int _getpid(void) { return 1; }
-int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }
+//int _write(int file, char *ptr, int len)
+//{
+//	(void)file;
+//	(void)ptr;
+//	return len;
+//}
+//int _read(int file, char *ptr, int len) { (void)file; (void)ptr; (void)len; return 0; }
+//int _fstat(int file, struct stat *st) { (void)file; (void)st; return 0; }
+//int _lseek(int file, int ptr, int dir) { (void)file; (void)ptr; (void)dir; return 0; }
+//int _isatty(int file) { (void)file; return 1; }
+//int _close(int file) { (void)file; return -1; }
+//int _getpid(void) { return 1; }
+//int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }

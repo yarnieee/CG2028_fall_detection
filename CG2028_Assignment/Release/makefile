@@ -59,6 +59,9 @@ default.size.stdout \
 OBJDUMP_LIST += \
 CG2028_Assignment.list \
 
+OBJCOPY_BIN += \
+CG2028_Assignment.bin \
+
 
 # All Target
 all: main-build
@@ -82,12 +85,17 @@ CG2028_Assignment.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEP
 	@echo 'Finished building: $@'
 	@echo ' '
 
+CG2028_Assignment.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "CG2028_Assignment.bin"
+	@echo 'Finished building: $@'
+	@echo ' '
+
 # Other Targets
 clean:
-	-$(RM) CG2028_Assignment.elf CG2028_Assignment.list CG2028_Assignment.map default.size.stdout
+	-$(RM) CG2028_Assignment.bin CG2028_Assignment.elf CG2028_Assignment.list CG2028_Assignment.map default.size.stdout
 	-@echo ' '
 
-secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)
+secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST) $(OBJCOPY_BIN)
 
 fail-specified-linker-script-missing:
 	@echo 'Error: Cannot find the specified linker script. Check the linker settings in the build configuration.'
