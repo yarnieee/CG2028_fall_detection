@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f36f61">
+  <title>{% block title %}Overview{% endblock %} · Fall Detector Base Station</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <a class="brand" href="{{ url_for('main') }}" aria-label="Fall Detector Base Station home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M16 27.3S5.25 21.2 5.25 12.5a5.7 5.7 0 0 1 10.75-2.68A5.7 5.7 0 0 1 26.75 12.5C26.75 21.2 16 27.3 16 27.3Z" fill="currentColor"/><path d="M10.2 15.2h3.1l1.35-3.35 2.15 7.05 1.55-3.7h3.45" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span><strong>Care</strong>Pulse</span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a class="{% if request.endpoint == 'main' %}active{% endif %}" href="{{ url_for('main') }}">Overview</a>
+        <a class="{% if request.endpoint == 'edit_particulars' %}active{% endif %}" href="{{ url_for('edit_particulars') }}">My Particulars</a>
+        <a class="{% if request.endpoint == 'edit_emergency_contacts' %}active{% endif %}" href="{{ url_for('edit_emergency_contacts') }}">Emergency Contacts</a>
+      </nav>
+      <div class="header-tools">
+        <span class="connection-dot"><i></i> Monitor ready</span>
+        <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
+      </div>
+    </header>
+
+    <main>{% block content %}{% endblock %}</main>
+
+    <footer class="site-footer">
+      <div class="footer-brand"><span class="brand-mark small" aria-hidden="true">♥</span><span><strong>Care</strong>Pulse</span></div>
+      <p>Calm, connected support for everyday independence.</p>
+      <span class="footer-note">For emergencies, call <strong>995</strong></span>
+    </footer>
+  </div>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

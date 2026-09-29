@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Emergency Contacts{% endblock %}
+{% block content %}
+<section class="page-heading container"><div><p class="eyebrow"><a href="{{ url_for('main') }}">OVERVIEW</a> <span>/</span> EMERGENCY CONTACTS</p><h1>People to be notified in case of a fall.</h1></div><div class="heading-badge warm">☎ Emergency support <strong>995</strong></div></section>
+
+<section class="form-layout container">
+  <div class="form-main card">
+    {% if saved %}<div class="success-message" role="status"><span>✓</span> Your emergency contacts has been saved.</div>{% endif %}
+    <form method="post" id="contacts-form">
+      <input type="hidden" name="contact_count" id="contact-count" value="{{ contacts|length }}">
+      <div class="contacts-intro"><div class="section-number">01</div><div><h2>Your emergency contacts</h2><p>We recommend adding someone nearby and someone who can make decisions if needed.</p></div></div>
+      <div id="contact-list" class="editable-contacts">
+      {% for contact in contacts %}
+        <article class="contact-editor" data-contact-card>
+          <div class="contact-editor-top"><div class="contact-avatar large">{{ (contact.name or 'C')[:1]|upper }}</div><div><span class="eyebrow">CONTACT {{ '%02d'|format(loop.index) }}</span><h3 class="contact-card-title">{{ contact.name or 'New emergency contact' }}</h3></div><button class="remove-contact" type="button" aria-label="Remove contact">Remove</button></div>
+          <div class="field-grid three-col"><label class="field"><span>Name</span><input data-field="name" name="contact_name_{{ loop.index0 }}" value="{{ contact.name }}" placeholder="e.g. Sarah Tan"></label><label class="field"><span>Relationship</span><input data-field="relationship" name="contact_relationship_{{ loop.index0 }}" value="{{ contact.relationship }}" placeholder="e.g. Daughter"></label><label class="field"><span>Phone number</span><input data-field="phone" name="contact_phone_{{ loop.index0 }}" value="{{ contact.contact }}" placeholder="e.g. 9123 4567" type="tel"></label></div>
+        </article>
+      {% endfor %}
+      </div>
+      <button class="add-contact" id="add-contact" type="button"><span>+</span> Add another contact</button>
+      <div class="form-actions"><a class="button ghost" href="{{ url_for('main') }}">Cancel</a><button class="button primary" type="submit">Save Emergency Contacts <span>✓</span></button></div>
+    </form>
+  </div>
+  <aside class="side-note coral-note"><div class="note-icon">♥</div><h2>Emergency services contact number</h2><div class="callout-number"><strong>995</strong><span>For a medical emergency</span></div><a class="text-link" href="{{ url_for('edit_particulars') }}">Back to profile <span>→</span></a></aside>
+</section>
+<template id="contact-template"><article class="contact-editor" data-contact-card><div class="contact-editor-top"><div class="contact-avatar large">C</div><div><span class="eyebrow">CONTACT <span data-contact-number>00</span></span><h3 class="contact-card-title">New care contact</h3></div><button class="remove-contact" type="button" aria-label="Remove contact">Remove</button></div><div class="field-grid three-col"><label class="field"><span>Name</span><input data-field="name" placeholder="e.g. Sarah Tan"></label><label class="field"><span>Relationship</span><input data-field="relationship" placeholder="e.g. Daughter"></label><label class="field"><span>Phone number</span><input data-field="phone" placeholder="e.g. 9123 4567" type="tel"></label></div></article></template>
+{% endblock %}
