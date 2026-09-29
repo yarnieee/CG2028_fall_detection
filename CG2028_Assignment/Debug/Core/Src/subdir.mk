@@ -8,6 +8,8 @@ S_SRCS += \
 ../Core/Src/mov_avg.s 
 
 C_SRCS += \
+../Core/Src/es_wifi.c \
+../Core/Src/es_wifi_io.c \
 ../Core/Src/grove_multi_switch.c \
 ../Core/Src/ht16k33.c \
 ../Core/Src/main.c \
@@ -15,9 +17,12 @@ C_SRCS += \
 ../Core/Src/stm32l4xx_hal_msp.c \
 ../Core/Src/stm32l4xx_it.c \
 ../Core/Src/sysmem.c \
-../Core/Src/system_stm32l4xx.c 
+../Core/Src/system_stm32l4xx.c \
+../Core/Src/wifi.c 
 
 OBJS += \
+./Core/Src/es_wifi.o \
+./Core/Src/es_wifi_io.o \
 ./Core/Src/grove_multi_switch.o \
 ./Core/Src/ht16k33.o \
 ./Core/Src/main.o \
@@ -26,12 +31,15 @@ OBJS += \
 ./Core/Src/stm32l4xx_hal_msp.o \
 ./Core/Src/stm32l4xx_it.o \
 ./Core/Src/sysmem.o \
-./Core/Src/system_stm32l4xx.o 
+./Core/Src/system_stm32l4xx.o \
+./Core/Src/wifi.o 
 
 S_DEPS += \
 ./Core/Src/mov_avg.d 
 
 C_DEPS += \
+./Core/Src/es_wifi.d \
+./Core/Src/es_wifi_io.d \
 ./Core/Src/grove_multi_switch.d \
 ./Core/Src/ht16k33.d \
 ./Core/Src/main.d \
@@ -39,7 +47,8 @@ C_DEPS += \
 ./Core/Src/stm32l4xx_hal_msp.d \
 ./Core/Src/stm32l4xx_it.d \
 ./Core/Src/sysmem.d \
-./Core/Src/system_stm32l4xx.d 
+./Core/Src/system_stm32l4xx.d \
+./Core/Src/wifi.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes
@@ -51,7 +60,7 @@ Core/Src/%.o: ../Core/Src/%.s Core/Src/subdir.mk
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
-	-$(RM) ./Core/Src/grove_multi_switch.cyclo ./Core/Src/grove_multi_switch.d ./Core/Src/grove_multi_switch.o ./Core/Src/grove_multi_switch.su ./Core/Src/ht16k33.cyclo ./Core/Src/ht16k33.d ./Core/Src/ht16k33.o ./Core/Src/ht16k33.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/mov_avg.d ./Core/Src/mov_avg.o ./Core/Src/ssd1306.cyclo ./Core/Src/ssd1306.d ./Core/Src/ssd1306.o ./Core/Src/ssd1306.su ./Core/Src/stm32l4xx_hal_msp.cyclo ./Core/Src/stm32l4xx_hal_msp.d ./Core/Src/stm32l4xx_hal_msp.o ./Core/Src/stm32l4xx_hal_msp.su ./Core/Src/stm32l4xx_it.cyclo ./Core/Src/stm32l4xx_it.d ./Core/Src/stm32l4xx_it.o ./Core/Src/stm32l4xx_it.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32l4xx.cyclo ./Core/Src/system_stm32l4xx.d ./Core/Src/system_stm32l4xx.o ./Core/Src/system_stm32l4xx.su
+	-$(RM) ./Core/Src/es_wifi.cyclo ./Core/Src/es_wifi.d ./Core/Src/es_wifi.o ./Core/Src/es_wifi.su ./Core/Src/es_wifi_io.cyclo ./Core/Src/es_wifi_io.d ./Core/Src/es_wifi_io.o ./Core/Src/es_wifi_io.su ./Core/Src/grove_multi_switch.cyclo ./Core/Src/grove_multi_switch.d ./Core/Src/grove_multi_switch.o ./Core/Src/grove_multi_switch.su ./Core/Src/ht16k33.cyclo ./Core/Src/ht16k33.d ./Core/Src/ht16k33.o ./Core/Src/ht16k33.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/mov_avg.d ./Core/Src/mov_avg.o ./Core/Src/ssd1306.cyclo ./Core/Src/ssd1306.d ./Core/Src/ssd1306.o ./Core/Src/ssd1306.su ./Core/Src/stm32l4xx_hal_msp.cyclo ./Core/Src/stm32l4xx_hal_msp.d ./Core/Src/stm32l4xx_hal_msp.o ./Core/Src/stm32l4xx_hal_msp.su ./Core/Src/stm32l4xx_it.cyclo ./Core/Src/stm32l4xx_it.d ./Core/Src/stm32l4xx_it.o ./Core/Src/stm32l4xx_it.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32l4xx.cyclo ./Core/Src/system_stm32l4xx.d ./Core/Src/system_stm32l4xx.o ./Core/Src/system_stm32l4xx.su ./Core/Src/wifi.cyclo ./Core/Src/wifi.d ./Core/Src/wifi.o ./Core/Src/wifi.su
 
 .PHONY: clean-Core-2f-Src
 

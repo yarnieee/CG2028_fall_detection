@@ -1,0 +1,8 @@
+../Core/Src/main.c:300:13:UART_Send	8	static
+../Core/Src/main.c:657:16:I2C_DevicePresent	8	static
+../Core/Src/main.c:783:13:Matrix_ShowFace	32	static
+../Core/Src/main.c:826:13:OLED_SetInitMessage.constprop	8	static
+../Core/Src/main.c:129:5:main	456	static
+../Core/Src/main.c:858:6:HAL_SYSTICK_Callback	16	static
+../Core/Src/main.c:885:6:HAL_GPIO_EXTI_Callback	8	static
+../Core/Src/main.c:901:6:SPI3_IRQHandler	0	static

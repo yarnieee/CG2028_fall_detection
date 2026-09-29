@@ -1,0 +1,8 @@
+../Core/Src/grove_multi_switch.c:38:26:GroveMultiSwitch_ReadRegister	2
+../Core/Src/grove_multi_switch.c:72:19:GroveMultiSwitch_ReadDeviceID	4
+../Core/Src/grove_multi_switch.c:129:19:GroveMultiSwitch_SetEventMode	2
+../Core/Src/grove_multi_switch.c:144:19:GroveMultiSwitch_Init	13
+../Core/Src/grove_multi_switch.c:202:19:GroveMultiSwitch_ReadEvent	9
+../Core/Src/grove_multi_switch.c:257:10:GroveMultiSwitch_GetDeviceID	2
+../Core/Src/grove_multi_switch.c:263:9:GroveMultiSwitch_GetButtonCount	2
+../Core/Src/grove_multi_switch.c:269:13:GroveMultiSwitch_GetFirmwareString	2

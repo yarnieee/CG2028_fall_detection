@@ -12,6 +12,7 @@
 #include "../Inc/ssd1306.h"
 #include "../Inc/ht16k33.h"
 #include "../Inc/grove_multi_switch.h"
+#include "wifi.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -19,6 +20,7 @@
 #include <float.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdlib.h>	// for rand(). Can be removed if valid sensor data is sent instead
 
 /*--------------------------- Configuration ----------------------------------*/
 #define EWMA_ALPHA_ACCEL_PERCENT   40
@@ -35,7 +37,9 @@ UART_HandleTypeDef huart1;
 
 /*============================ Additional Configurations ===============================*/
 #define DEMO_MODE 1
-
+#define MAX_MESSAGE_LENGTH 128	// adjust it depending on the max size of the packet you expect to send or receive
+#define WIFI_READ_TIMEOUT 10000
+#define WIFI_WRITE_TIMEOUT 10000
 #define OLED_ADDR    (0x3C << 1)
 #define MATRIX_ADDR  (0x70 << 1)
 #define SWITCH_ADDR  (0x03 << 1)
@@ -48,6 +52,7 @@ typedef enum FallState {
 	LONG_LIE_4
 } FallState;
 
+// Main Function Declarations
 static FallState FallDetector_Update(float accel_mps2, float gyro_dps, uint32_t current_time);
 static void UpdateSoundStatus(uint16_t sound_value, uint32_t current_time);
 static void UpdateBuzzer(FallState fall_state, uint32_t current_time);
@@ -55,21 +60,34 @@ static void HandleFallStateChange(FallState fall_state);
 static void LogStatus(FallState fall_state, float accel_magnitude, float gyro_magnitude, uint8_t loud_sound_detected, uint32_t current_time);
 static void ProcessResetRequest(void);
 
+// Initialization Function Declarations
 static void External_Peripherals_Init(void);
 static void I2C_TestDevices(void);
 static uint8_t I2C_DevicePresent(uint16_t address);
+static void Wifi_Full_Init(void);
+static void I2C_Devices_Full_Init(void);
+
+// Peripherals Helper Declarations
+static void ProcessSwitchEvents(void);
 static uint16_t SoundSensor_Read(void);
 static void Buzzer_Set(uint8_t enabled);
+
+// Matrix Helper Function Declarations
 static void Matrix_ShowFace(const uint8_t face[8][8]);
 static void Matrix_ShowHappyFace(void);
 static void Matrix_ShowSadFace(void);
+
+// OLED Function Declarations
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display);
-static void ProcessSwitchEvents(void);
+
+// Interrupt Function Declarations
 void HAL_SYSTICK_Callback(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void SPI3_IRQHandler(void);
 
+SPI_HandleTypeDef hspi3;
 ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 static SSD1306_HandleTypeDef oled;
@@ -85,6 +103,14 @@ static volatile uint8_t fall_detected            = 0;
 static volatile uint8_t loud_sound_detected      = 0; // Status flag to indicate when a potential impact sound is detected
 static volatile uint8_t led_fall_mode            = 0;
 static volatile uint8_t led_timer_enabled        = 0;
+
+// Wifi related constants
+const char* WiFi_SSID = "DIDSBSAYYOGA";
+const char* WiFi_password = "5\\5F987i";
+const WIFI_Ecn_t WiFi_security = WIFI_ECN_WPA2_PSK;	// WiFi security your router / Hotspot
+const uint16_t SOURCE_PORT = 1234;
+const uint16_t DEST_PORT = 2028; // 'server' port number - this is the port Packet Sender listens to
+uint8_t ipaddr[4] = {10, 237, 248, 129}; // IP address of our laptop wireless lan adapter
 
 // Threshold constants for FallDetector_Update(), used to compare against active values
 const float FREEFALL_THRESHOLD_MPS2 = 6.00f; // MPS2 is metres per second squared
@@ -109,34 +135,17 @@ int main(void) {
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
 
+    /*====================== WIFI INITIALISATION =============================*/
+	Wifi_Full_Init();
+
     /*=============== LED AND RESET BUTTON INITIALISATION ====================*/
     led_timer_enabled = 1;
     BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
-	/*======= SOUND SENSOR, BUZZER, OLED, AND LED MATRIX INITIALISATION ======*/
+	/*= SOUND SENSOR, BUZZER, OLED, LED MATRIX & 5 WAY SWITCH INITIALISATION =*/
     External_Peripherals_Init();
     I2C_TestDevices();
-
-    if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK) {
-    	OLED_SetInitMessage(&oled);
-        oled_ready = 1;
-    } else {
-        UART_Send("SSD1306 init failed\r\n");
-    }
-
-    if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK) {
-        Matrix_ShowHappyFace();
-        led_matrix_ready = 1;
-    } else {
-        UART_Send("HT16K33 init failed\r\n");
-    }
-
-    if (GroveMultiSwitch_Init(&grove_switch, &hi2c1, SWITCH_ADDR) == HAL_OK) {
-        switch_ready = 1;
-        UART_Send("5 way switch initialised\r\n");
-    } else {
-        UART_Send("5 way switch init failed\r\n");
-    }
+    I2C_Devices_Full_Init();
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
@@ -147,6 +156,11 @@ int main(void) {
 
     // while loop runs once every 20ms
     while (1) {
+		//int temper = rand()%40; // Just a random value for demo. Use the reading from sensors as appropriate
+		//sprintf((char*)req, "temperature : %d\r", temper);
+		//WIFI_SendData(1, req, (uint16_t)strlen((char*)req), &Datalen, WIFI_WRITE_TIMEOUT);
+		//HAL_Delay(1000);
+
         int16_t accel_raw_i16[3] = {0, 0, 0};
         float  gyro_raw_float[3] = {0.0f, 0.0f, 0.0f};
         int      gyro_raw_int[3] = {0, 0, 0};
@@ -244,7 +258,7 @@ int main(void) {
 		/*=============== UART, LED MATRIX AND OLED ==========================*/
         HandleFallStateChange(fall_state);
 
-        /*================= UART LOGGING =====================================*/
+        /*================= UART/WIFI LOGGING ================================*/
         LogStatus(fall_state, accel_magnitude, gyro_magnitude, loud_sound_detected, current_time);
 
         if (reset_requested) {
@@ -287,6 +301,7 @@ static void UART_Send(const char *text) {
     HAL_UART_Transmit(&huart1, (uint8_t *)text, strlen(text), HAL_MAX_DELAY);
 }
 
+// Main Function Definitions
 static FallState FallDetector_Update(
     float accel_mps2,
     float gyro_dps,
@@ -452,35 +467,47 @@ static void UpdateBuzzer(FallState fall_state, uint32_t current_time) {
 static void HandleFallStateChange(FallState fall_state) {
 	static FallState previous_state = NORMAL_0;
 
-	if (fall_state != previous_state) {
-		switch (fall_state) {
-		case NORMAL_0:
-			UART_Send("\n\nNORMAL\r\n");
-			break;
-		case FREEFALL_1:
-			UART_Send("\n\nFREEFALL\r\n");
-			break;
-		case IMPACT_2:
-			UART_Send("\n\nIMPACT\r\n");
-			break;
-		case FALLEN_3:
-			UART_Send("\n\nFALL CONFIRMED\r\n");
-			if (led_matrix_ready) {
-				Matrix_ShowSadFace();
-			}
-			if (oled_ready) {
-				OLED_SetFallMessage(&oled);
-			}
-			break;
-		case LONG_LIE_4:
-			UART_Send("\n\nLONG LIE ESCALATION: NO MOVEMENT\r\n");
-			if (oled_ready) {
-				OLED_SetLongLieMessage(&oled);
-			}
-		}
-
-		previous_state = fall_state;
+	if (fall_state == previous_state) {
+		return;
 	}
+
+	char state_message[64];
+	const char *state_text = "UNKNOWN STATE";
+
+	switch (fall_state) {
+	case NORMAL_0:
+		state_text = "NORMAL";
+		break;
+	case FREEFALL_1:
+		state_text = "FREEFALL";
+		break;
+	case IMPACT_2:
+		state_text = "IMPACT";
+		break;
+	case FALLEN_3:
+		state_text = "FALL CONFIRMED";
+		if (led_matrix_ready) {
+			Matrix_ShowSadFace();
+		}
+		if (oled_ready) {
+			OLED_SetFallMessage(&oled);
+		}
+		break;
+	case LONG_LIE_4:
+		state_text = "LONG LIE ESCALATION: NO MOVEMENT";
+		if (oled_ready) {
+			OLED_SetLongLieMessage(&oled);
+		}
+	}
+
+	snprintf(state_message, sizeof(state_message), "\r\n%s\r\n", state_text);
+
+	UART_Send(state_message);
+
+	uint16_t Datalen;
+	WIFI_SendData(1, (uint8_t*)state_message, (uint16_t)strlen(state_message), &Datalen, WIFI_WRITE_TIMEOUT);
+
+	previous_state = fall_state;
 }
 static void LogStatus(
 		FallState fall_state,
@@ -491,7 +518,7 @@ static void LogStatus(
     static uint32_t last_log_time = 0;
 
     if ((current_time - last_log_time) >= 250U) {
-		char log_message[160];
+		char log_message[MAX_MESSAGE_LENGTH];
 		snprintf(log_message, sizeof(log_message),
 				 "Time: %6u | State: %d | Accel: %6.2f | Gyro: %6.2f | Possible Impact Sound: %u\r\n",
 				 (unsigned int) current_time,
@@ -500,6 +527,9 @@ static void LogStatus(
 				 gyro_magnitude,
 				 loud_sound_detected);
 		UART_Send(log_message);
+
+	    uint16_t Datalen;
+		WIFI_SendData(1, (uint8_t*)log_message, (uint16_t)strlen(log_message), &Datalen, WIFI_WRITE_TIMEOUT);
 		last_log_time = current_time;
     }
 }
@@ -522,6 +552,7 @@ static void ProcessResetRequest(void) {
 	detector_reset_requested = 1;
 }
 
+// Initialization Function Definitions
 static void External_Peripherals_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
@@ -617,34 +648,87 @@ static void External_Peripherals_Init(void) {
     }
 }
 static void I2C_TestDevices(void) {
-    if (I2C_DevicePresent(OLED_ADDR))
-    {
-        UART_Send("OLED detected\r\n");
-    }
-    else
-    {
-        UART_Send("OLED not detected\r\n");
+    if (I2C_DevicePresent(OLED_ADDR)) {
+        UART_Send("OLED DETECTED\r\n");
+    } else {
+        UART_Send("OLED NOT DETECTED\r\n");
     }
 
-    if (I2C_DevicePresent(MATRIX_ADDR))
-    {
-        UART_Send("LED matrix detected\r\n");
-    }
-    else
-    {
-        UART_Send("LED matrix not detected\r\n");
+    if (I2C_DevicePresent(MATRIX_ADDR)) {
+        UART_Send("LED MATRIX DETECTED\r\n");
+    } else {
+        UART_Send("LED MATRIX NOT DETECTED\r\n");
     }
 
-    if (I2C_DevicePresent(SWITCH_ADDR))
-    {
-        UART_Send("5 way switch detected\r\n");
-    }
-    else
-    {
-        UART_Send("5 way switch not detected\r\n");
+    if (I2C_DevicePresent(SWITCH_ADDR)) {
+        UART_Send("5 WAY SWITCH DETECTED\r\n");
+    } else {
+        UART_Send("5 WAY SWITCH NOT DETECTED\r\n");
     }
 }
+static uint8_t I2C_DevicePresent(uint16_t address) {
+    return HAL_I2C_IsDeviceReady(
+        &hi2c1,
+        address,
+        2,
+        100
+    ) == HAL_OK;
+}
+static void Wifi_Full_Init(void) {
+	if(WIFI_Init() == WIFI_STATUS_OK) {
+		UART_Send("WIFI_INIT SUCCESS\r\n");
+	} else {
+		UART_Send("WIFI_INIT FAILED\r\n");
+		while(1); // halt computations if a connection could not be established with the server
+	}
 
+	if(WIFI_Connect(WiFi_SSID, WiFi_password, WiFi_security) == WIFI_STATUS_OK) {
+		UART_Send("WIFI_CONNECT SUCCESS\r\n");
+	} else {
+		UART_Send("WIFI_CONNECT FAILED\r\n");
+		while(1); // halt computations if a connection could not be established with the server
+	}
+
+	if(WIFI_Ping(ipaddr, 3, 200) == WIFI_STATUS_OK) {
+		UART_Send("PING SUCCESS\r\n");
+	} else {
+		UART_Send("PING FAILED\r\n");
+	}
+
+	// Make a TCP connection
+	if(WIFI_OpenClientConnection(1, WIFI_TCP_PROTOCOL, "conn", ipaddr, DEST_PORT, SOURCE_PORT) == WIFI_STATUS_OK) {
+		UART_Send("TCP CONNECTION SUCCESS\r\n");
+	} else {
+		UART_Send("TCP CONNECTION FAILED\r\n");
+		while(1); // halt computations if a connection could not be established with the server
+	}
+}
+static void I2C_Devices_Full_Init(void) {
+	if (SSD1306_Init(&oled, &hi2c1, OLED_ADDR) == HAL_OK) {
+		OLED_SetInitMessage(&oled);
+		oled_ready = 1;
+		UART_Send("SSD1306 INIT SUCCESS\r\n");
+	} else {
+		UART_Send("SSD1306 INIT FAILED\r\n");
+	}
+
+	if (HT16K33_Init(&led_matrix, &hi2c1, MATRIX_ADDR) == HAL_OK) {
+		Matrix_ShowHappyFace();
+		led_matrix_ready = 1;
+		UART_Send("HT16K33 INIT SUCCESS\r\n");
+	} else {
+		UART_Send("HT16K33 INIT FAILED\r\n");
+	}
+
+	if (GroveMultiSwitch_Init(&grove_switch, &hi2c1, SWITCH_ADDR) == HAL_OK) {
+		switch_ready = 1;
+		UART_Send("5 WAY SWITCH INIT SUCCESS\r\n");
+	} else {
+		UART_Send("5 WAY SWITCH INIT FAILED\r\n");
+	}
+}
+
+// Peripherals Helper Function Definitions
 static void ProcessSwitchEvents(void) {
     GroveMultiSwitch_EventTypeDef event;
     static const char *const button_names[5] = {
@@ -686,16 +770,6 @@ static void ProcessSwitchEvents(void) {
         }
     }
 }
-
-static uint8_t I2C_DevicePresent(uint16_t address) {
-    return HAL_I2C_IsDeviceReady(
-        &hi2c1,
-        address,
-        2,
-        100
-    ) == HAL_OK;
-}
-
 static uint16_t SoundSensor_Read(void) {
     uint16_t value = 0;
 
@@ -717,6 +791,7 @@ static void Buzzer_Set(uint8_t enabled) {
     );
 }
 
+// Matrix Helper Function Definitions
 static void Matrix_ShowFace(const uint8_t face[8][8]) {
     HT16K33_Clear(&led_matrix);
 
@@ -759,6 +834,7 @@ static void Matrix_ShowSadFace(void) {
     Matrix_ShowFace(sad_face);
 }
 
+// OLED Helper Function Definitions
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Clear(display);
     SSD1306_SetCursor(display, 16, 0);
@@ -779,7 +855,6 @@ static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display) {
 	SSD1306_WriteString(display, "AGE: 85");
 	SSD1306_Update(display);
 }
-
 static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Clear(display);
     SSD1306_SetCursor(display, 16, 0);
@@ -791,6 +866,7 @@ static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Update(display);
 }
 
+// Interrupt Function Definitions
 void HAL_SYSTICK_Callback(void) {
 	// NOTE: Added "HAL_SYSTICK_IRQHandler();" to
 	// "void SysTick_Handler(void)" in stm32l4xx.it.c
@@ -822,6 +898,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     static uint32_t last_press_time = 0;
     uint32_t current_time = HAL_GetTick();
 
+    if (GPIO_Pin == GPIO_PIN_1) {
+    	SPI_WIFI_ISR();
+    }
+
     if (GPIO_Pin == BUTTON_EXTI13_Pin) {
         // Ignore switch bounce for 250 ms
         if ((current_time - last_press_time) > 250U) {
@@ -829,6 +909,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
             last_press_time = current_time;
         }
     }
+}
+void SPI3_IRQHandler(void) {
+	HAL_SPI_IRQHandler(&hspi3);
 }
 
 /* Do not modify these lines. They suppress UART-related warnings. */
