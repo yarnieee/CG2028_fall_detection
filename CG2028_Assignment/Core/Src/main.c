@@ -11,6 +11,7 @@
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h"
 #include "../Inc/ssd1306.h"
 #include "../Inc/ht16k33.h"
+#include "../Inc/grove_multi_switch.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -65,6 +66,7 @@ static void Matrix_ShowSadFace(void);
 static void OLED_SetInitMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display);
 static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display);
+static void ProcessSwitchEvents(void);
 void HAL_SYSTICK_Callback(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 
@@ -72,8 +74,10 @@ ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 static SSD1306_HandleTypeDef oled;
 static HT16K33_HandleTypeDef led_matrix;
+static GroveMultiSwitch_HandleTypeDef grove_switch;
 static uint8_t oled_ready = 0;
 static uint8_t led_matrix_ready = 0;
+static uint8_t switch_ready = 0;
 
 static volatile uint8_t reset_requested          = 0;
 static volatile uint8_t detector_reset_requested = 0;
@@ -127,10 +131,11 @@ int main(void) {
         UART_Send("HT16K33 init failed\r\n");
     }
 
-    if (???(&???, &hi2c1, SWITCH_ADDR) == HAL_OK) {
+    if (GroveMultiSwitch_Init(&grove_switch, &hi2c1, SWITCH_ADDR) == HAL_OK) {
         switch_ready = 1;
+        UART_Send("5 way switch initialised\r\n");
     } else {
-        UART_Send("??? init failed\r\n");
+        UART_Send("5 way switch init failed\r\n");
     }
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
@@ -214,6 +219,10 @@ int main(void) {
                   gyro_dps[2] * gyro_dps[2]);
 
         uint16_t sound_value = SoundSensor_Read();
+
+        if (switch_ready) {
+            ProcessSwitchEvents();
+        }
 
         uint32_t current_time = HAL_GetTick();
 
@@ -635,6 +644,49 @@ static void I2C_TestDevices(void) {
         UART_Send("5 way switch not detected\r\n");
     }
 }
+
+static void ProcessSwitchEvents(void) {
+    GroveMultiSwitch_EventTypeDef event;
+    static const char *const button_names[5] = {
+        "U", "L", "D", "R", "C"
+    };
+
+    if (GroveMultiSwitch_ReadEvent(&grove_switch, &event) != HAL_OK ||
+        !(event.event & GROVE_MULTI_SWITCH_EVENT_PRESENT)) {
+        return;
+    }
+
+    for (uint8_t index = 0U;
+         index < GroveMultiSwitch_GetButtonCount(&grove_switch) && index < 5U;
+         index++) {
+        char message[96];
+
+        if (event.button[index] & GROVE_MULTI_SWITCH_SINGLE_CLICK) {
+            snprintf(message, sizeof(message),
+                     "SW %s single click\r\n", button_names[index]);
+            UART_Send(message);
+        }
+        if (event.button[index] & GROVE_MULTI_SWITCH_DOUBLE_CLICK) {
+            snprintf(message, sizeof(message),
+                     "SW %s double click\r\n", button_names[index]);
+            UART_Send(message);
+        }
+        if (event.button[index] & GROVE_MULTI_SWITCH_LONG_PRESS) {
+            snprintf(message, sizeof(message),
+                     "SW %s long press\r\n", button_names[index]);
+            UART_Send(message);
+        }
+        if (event.button[index] & GROVE_MULTI_SWITCH_LEVEL_CHANGED) {
+            snprintf(message, sizeof(message),
+                     "SW %s %s\r\n",
+                     button_names[index],
+                     (event.button[index] & GROVE_MULTI_SWITCH_RAW_STATUS)
+                         ? "released" : "pressed");
+            UART_Send(message);
+        }
+    }
+}
+
 static uint8_t I2C_DevicePresent(uint16_t address) {
     return HAL_I2C_IsDeviceReady(
         &hi2c1,
@@ -682,10 +734,10 @@ static void Matrix_ShowHappyFace(void) {
     static const uint8_t happy_face[8][8] = {
         {0, 0, 1, 1, 1, 1, 0, 0},
         {0, 1, 0, 0, 0, 0, 1, 0},
+        {1, 0, 0, 1, 1, 0, 0, 1},
         {1, 0, 1, 0, 0, 1, 0, 1},
         {1, 0, 0, 0, 0, 0, 0, 1},
         {1, 0, 1, 0, 0, 1, 0, 1},
-        {1, 0, 0, 1, 1, 0, 0, 1},
         {0, 1, 0, 0, 0, 0, 1, 0},
         {0, 0, 1, 1, 1, 1, 0, 0}
     };
@@ -697,8 +749,8 @@ static void Matrix_ShowSadFace(void) {
         {0, 0, 1, 1, 1, 1, 0, 0},
         {0, 1, 0, 0, 0, 0, 1, 0},
         {1, 0, 1, 0, 0, 1, 0, 1},
-        {1, 0, 0, 0, 0, 0, 0, 1},
         {1, 0, 0, 1, 1, 0, 0, 1},
+        {1, 0, 0, 0, 0, 0, 0, 1},
         {1, 0, 1, 0, 0, 1, 0, 1},
         {0, 1, 0, 0, 0, 0, 1, 0},
         {0, 0, 1, 1, 1, 1, 0, 0}
@@ -727,6 +779,7 @@ static void OLED_SetFallMessage(SSD1306_HandleTypeDef *display) {
 	SSD1306_WriteString(display, "AGE: 85");
 	SSD1306_Update(display);
 }
+
 static void OLED_SetLongLieMessage(SSD1306_HandleTypeDef *display) {
     SSD1306_Clear(display);
     SSD1306_SetCursor(display, 16, 0);

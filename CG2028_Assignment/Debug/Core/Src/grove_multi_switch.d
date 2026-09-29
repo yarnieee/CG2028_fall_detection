@@ -1,4 +1,5 @@
-Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
+Core/Src/grove_multi_switch.o: ../Core/Src/grove_multi_switch.c \
+ ../Core/Inc/grove_multi_switch.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h \
  ../Core/Inc/stm32l4xx_hal_conf.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_rcc.h \
@@ -40,16 +41,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h \
- ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_accelero.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/lsm6dsl.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/../Common/accelero.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/../Common/gyro.h \
- ../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h \
- ../Core/Src/../Inc/ssd1306.h ../Core/Src/../Inc/ht16k33.h \
- ../Core/Src/../Inc/grove_multi_switch.h
-../Core/Inc/main.h:
+ ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h
+../Core/Inc/grove_multi_switch.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
 ../Core/Inc/stm32l4xx_hal_conf.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_rcc.h:
@@ -92,12 +85,3 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_accelero.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/lsm6dsl.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/../Common/accelero.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/../Components/lsm6dsl/../Common/gyro.h:
-../Core/Src/../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h:
-../Core/Src/../Inc/ssd1306.h:
-../Core/Src/../Inc/ht16k33.h:
-../Core/Src/../Inc/grove_multi_switch.h:

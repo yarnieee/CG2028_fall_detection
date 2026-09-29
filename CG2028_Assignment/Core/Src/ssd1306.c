@@ -1,6 +1,7 @@
 #include "ssd1306.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 static void SSD1306_GetGlyph(char character, uint8_t glyph[5])
 {
@@ -283,5 +284,91 @@ void SSD1306_WriteString(SSD1306_HandleTypeDef *display,
     while (*text != '\0')
     {
         SSD1306_WriteChar(display, *text++);
+    }
+}
+
+void SSD1306_DrawLine(SSD1306_HandleTypeDef *display,
+                             int x0, int y0,
+                             int x1, int y1,
+                             uint8_t colour)
+{
+    int dx = abs(x1 - x0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int dy = -abs(y1 - y0);
+    int sy = (y0 < y1) ? 1 : -1;
+    int error = dx + dy;
+
+    while (1)
+    {
+        SSD1306_DrawPixel(display, x0, y0, colour);
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        int error2 = 2 * error;
+
+        if (error2 >= dy)
+        {
+            error += dy;
+            x0 += sx;
+        }
+
+        if (error2 <= dx)
+        {
+            error += dx;
+            y0 += sy;
+        }
+    }
+}
+
+void SSD1306_FillRect(SSD1306_HandleTypeDef *display,
+                             uint8_t x,
+                             uint8_t y,
+                             uint8_t width,
+                             uint8_t height,
+                             uint8_t colour)
+{
+    for (uint8_t row = 0; row < height; row++)
+    {
+        for (uint8_t column = 0; column < width; column++)
+        {
+            SSD1306_DrawPixel(display,
+                              x + column,
+                              y + row,
+                              colour);
+        }
+    }
+}
+
+void SSD1306_WriteStringColour(SSD1306_HandleTypeDef *display,
+                               const char *text,
+                               uint8_t foreground)
+{
+    while (*text != '\0')
+    {
+        char character = *text++;
+        uint8_t glyph[5];
+
+        SSD1306_GetGlyph(character, glyph);
+
+        for (uint8_t column = 0; column < 5; column++)
+        {
+            for (uint8_t row = 0; row < 7; row++)
+            {
+                uint8_t pixel = (glyph[column] >> row) & 0x01U;
+
+                if (!foreground)
+                {
+                    pixel = !pixel;
+                }
+
+                SSD1306_DrawPixel(display,
+                                  display->cursor_x + column,
+                                  display->cursor_y + row,
+                                  pixel);
+            }
+        }
+
+        display->cursor_x += 6;
     }
 }

@@ -35,5 +35,20 @@ void SSD1306_DrawPixel(SSD1306_HandleTypeDef *display,
 void SSD1306_WriteChar(SSD1306_HandleTypeDef *display, char character);
 void SSD1306_WriteString(SSD1306_HandleTypeDef *display,
                          const char *text);
+void SSD1306_DrawLine(SSD1306_HandleTypeDef *display,
+                             int x0, int y0,
+                             int x1, int y1,
+                             uint8_t colour);
+
+void SSD1306_FillRect(SSD1306_HandleTypeDef *display,
+                             uint8_t x,
+                             uint8_t y,
+                             uint8_t width,
+                             uint8_t height,
+                             uint8_t colour);
+
+void SSD1306_WriteStringColour(SSD1306_HandleTypeDef *display,
+    const char *text,
+    uint8_t foreground);
 
 #endif /* SSD1306_H */

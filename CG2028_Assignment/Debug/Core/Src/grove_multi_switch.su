@@ -1,0 +1,14 @@
+../Core/Src/grove_multi_switch.c:14:26:GroveMultiSwitch_Write	32	static
+../Core/Src/grove_multi_switch.c:26:26:GroveMultiSwitch_Read	32	static
+../Core/Src/grove_multi_switch.c:38:26:GroveMultiSwitch_ReadRegister	32	static
+../Core/Src/grove_multi_switch.c:54:17:GroveMultiSwitch_U32FromLittleEndian	16	static
+../Core/Src/grove_multi_switch.c:62:17:GroveMultiSwitch_GetProductID	16	static
+../Core/Src/grove_multi_switch.c:67:17:GroveMultiSwitch_GetVendorID	16	static
+../Core/Src/grove_multi_switch.c:72:19:GroveMultiSwitch_ReadDeviceID	24	static
+../Core/Src/grove_multi_switch.c:96:26:GroveMultiSwitch_ReadFirmwareVersion	32	static
+../Core/Src/grove_multi_switch.c:129:19:GroveMultiSwitch_SetEventMode	24	static
+../Core/Src/grove_multi_switch.c:144:19:GroveMultiSwitch_Init	32	static
+../Core/Src/grove_multi_switch.c:202:19:GroveMultiSwitch_ReadEvent	32	static
+../Core/Src/grove_multi_switch.c:257:10:GroveMultiSwitch_GetDeviceID	16	static
+../Core/Src/grove_multi_switch.c:263:9:GroveMultiSwitch_GetButtonCount	16	static
+../Core/Src/grove_multi_switch.c:269:13:GroveMultiSwitch_GetFirmwareString	16	static
